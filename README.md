@@ -61,6 +61,23 @@ Create an S3 bucket and add a public read policy for the status data:
 }
 ```
 
+The cron job's AWS credentials also need read/write access. Create an IAM policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME/status.json"
+    }
+  ]
+}
+```
+
+Attach this policy to the IAM user whose credentials you use for `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
+
 ### 2. Environment Variables
 
 Copy `.env.example` and fill in:
