@@ -44,7 +44,9 @@ incident.io Widget API
 
 ### 1. S3 Bucket
 
-Create an S3 bucket and add a public read policy for the status data:
+Create an S3 bucket and add a public read policy for the status data.
+
+**Important**: New S3 buckets block all public access by default. You must first go to the bucket's **Permissions > Block public access** settings and disable "Block all public access" (you can leave the other sub-options off too, or just uncheck the top-level toggle). Then add this bucket policy:
 
 ```json
 {
