@@ -212,7 +212,16 @@ export function mergeHistoricalData(
   }
 
   // Overlay (or insert) fresh entries.
+  // When a date already exists, keep the worse (lower) uptime to avoid
+  // overwriting downtime recorded during an earlier cron run. This handles
+  // the case where an incident is active at 2pm (91% uptime computed) but
+  // resolved by 6pm (100% computed) -- we keep the 91%.
   for (const entry of freshEntries) {
+    const prev = map.get(entry.date);
+    if (prev && prev.uptime_pct < entry.uptime_pct) {
+      // Existing entry recorded worse uptime -- keep it.
+      continue;
+    }
     map.set(entry.date, entry);
   }
 

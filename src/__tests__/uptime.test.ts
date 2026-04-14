@@ -189,6 +189,20 @@ describe("mergeHistoricalData", () => {
     expect(result[1]).toEqual({ date: "2026-04-14", status: "degraded", uptime_pct: 95 });
   });
 
+  it("keeps worse (lower) uptime when fresh entry has higher uptime for same date", () => {
+    // Simulates: cron ran during incident (91%), then again after resolution (100%)
+    const existing: DailyUptime[] = [
+      { date: "2026-04-14", status: "outage", uptime_pct: 91.67 },
+    ];
+    const fresh: DailyUptime[] = [
+      { date: "2026-04-14", status: "operational", uptime_pct: 100 },
+    ];
+    const result = mergeHistoricalData(existing, fresh);
+    expect(result).toHaveLength(1);
+    // Should keep the 91.67% (worse), not overwrite with 100%
+    expect(result[0]).toEqual({ date: "2026-04-14", status: "outage", uptime_pct: 91.67 });
+  });
+
   it("appends new dates", () => {
     const existing: DailyUptime[] = [
       { date: "2026-04-13", status: "operational", uptime_pct: 100 },
