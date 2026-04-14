@@ -42,9 +42,9 @@ describe("checkEndpoint", () => {
     });
 
     const endpoint: HealthEndpoint = {
-      componentId: "memory-api",
-      name: "Memory API",
-      url: "https://api.hydradb.com/v1/memory/health",
+      componentId: "user-memory",
+      name: "User Memory",
+      url: "https://api.hydradb.com/memories/add_memory",
     };
 
     const result = await checkEndpoint(endpoint);
@@ -60,9 +60,9 @@ describe("checkEndpoint", () => {
     });
 
     const endpoint: HealthEndpoint = {
-      componentId: "docs-site",
-      name: "Docs Site",
-      url: "https://docs.hydradb.com",
+      componentId: "fetch-content",
+      name: "Fetch Content",
+      url: "https://api.hydradb.com/fetch/content",
     };
 
     const result = await checkEndpoint(endpoint);
@@ -74,9 +74,9 @@ describe("checkEndpoint", () => {
     global.fetch = jest.fn().mockRejectedValue(new Error("ECONNREFUSED"));
 
     const endpoint: HealthEndpoint = {
-      componentId: "website",
-      name: "Website",
-      url: "https://hydradb.com",
+      componentId: "full-recall",
+      name: "Full Recall",
+      url: "https://api.hydradb.com/recall/full_recall",
     };
 
     const result = await checkEndpoint(endpoint);
@@ -89,9 +89,9 @@ describe("checkEndpoint", () => {
     global.fetch = jest.fn().mockRejectedValue(new Error("The operation was aborted"));
 
     const endpoint: HealthEndpoint = {
-      componentId: "hybrid-search",
-      name: "Hybrid Search",
-      url: "https://api.hydradb.com/v1/search/health",
+      componentId: "search-embeddings",
+      name: "Search Embeddings",
+      url: "https://api.hydradb.com/embeddings/search_raw_embeddings",
       timeoutMs: 5000,
     };
 
@@ -110,7 +110,7 @@ describe("checkEndpoint", () => {
     const endpoint: HealthEndpoint = {
       componentId: "dashboard",
       name: "Dashboard",
-      url: "https://app.hydradb.com/health",
+      url: "https://app.hydradb.com",
       expectedStatus: [200],
     };
 
@@ -128,7 +128,7 @@ describe("checkEndpoint", () => {
     const endpoint: HealthEndpoint = {
       componentId: "dashboard",
       name: "Dashboard",
-      url: "https://app.hydradb.com/health",
+      url: "https://app.hydradb.com",
       expectedStatus: [200, 204],
     };
 
@@ -143,12 +143,30 @@ describe("checkEndpoint", () => {
     });
 
     const endpoint: HealthEndpoint = {
-      componentId: "document-upload",
-      name: "Document Upload",
-      url: "https://api.hydradb.com/v1/upload/health",
+      componentId: "knowledge-base",
+      name: "Knowledge Base",
+      url: "https://api.hydradb.com/ingestion/upload_knowledge",
     };
 
     const result = await checkEndpoint(endpoint);
+    expect(result.healthy).toBe(true);
+  });
+
+  it("accepts 401/403 when in expectedStatus (auth-gated endpoints)", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      status: 401,
+      ok: false,
+    });
+
+    const endpoint: HealthEndpoint = {
+      componentId: "monitor-infra-status",
+      name: "Monitor & Infra Status",
+      url: "https://api.hydradb.com/tenants/monitor",
+      expectedStatus: [200, 401, 403, 422],
+    };
+
+    const result = await checkEndpoint(endpoint);
+    // 401 means server is up, just needs auth — healthy
     expect(result.healthy).toBe(true);
   });
 });
@@ -163,8 +181,8 @@ describe("runHealthChecks", () => {
 
     const endpoints: HealthEndpoint[] = [
       { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
-      { componentId: "website", name: "Website", url: "https://hydradb.com" },
-      { componentId: "docs-site", name: "Docs Site", url: "https://docs.hydradb.com" },
+      { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: "https://api.hydradb.com/tenants/monitor" },
+      { componentId: "list-sub-tenant-ids", name: "List Sub-Tenant IDs", url: "https://api.hydradb.com/tenants/sub_tenant_ids" },
     ];
 
     const results = await runHealthChecks(endpoints);
@@ -175,7 +193,7 @@ describe("runHealthChecks", () => {
 
   it("handles mixed healthy/unhealthy results", async () => {
     global.fetch = jest.fn().mockImplementation((url: string) => {
-      if (url.includes("docs")) {
+      if (url.includes("monitor")) {
         return Promise.resolve({ status: 503, ok: false });
       }
       return Promise.resolve({ status: 200, ok: true });
@@ -183,7 +201,7 @@ describe("runHealthChecks", () => {
 
     const endpoints: HealthEndpoint[] = [
       { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
-      { componentId: "docs-site", name: "Docs Site", url: "https://docs.hydradb.com" },
+      { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: "https://api.hydradb.com/tenants/monitor" },
     ];
 
     const results = await runHealthChecks(endpoints);
@@ -239,7 +257,6 @@ describe("HEALTH_CHECK_ENDPOINTS env var parsing", () => {
       { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
     ]);
 
-    // Re-import to pick up env var
     jest.resetModules();
     const { getHealthEndpoints } = require("@/lib/health-config");
     const endpoints = getHealthEndpoints();
@@ -250,7 +267,7 @@ describe("HEALTH_CHECK_ENDPOINTS env var parsing", () => {
   it("parses simple object format", () => {
     process.env.HEALTH_CHECK_ENDPOINTS = JSON.stringify({
       dashboard: "https://app.hydradb.com",
-      website: "https://hydradb.com",
+      "full-recall": "https://api.hydradb.com/recall/full_recall",
     });
 
     jest.resetModules();
@@ -261,12 +278,14 @@ describe("HEALTH_CHECK_ENDPOINTS env var parsing", () => {
     expect(endpoints[0].url).toBe("https://app.hydradb.com");
   });
 
-  it("returns empty array on invalid JSON", () => {
+  it("falls back to defaults on invalid JSON", () => {
     process.env.HEALTH_CHECK_ENDPOINTS = "not-json";
 
     jest.resetModules();
     const { getHealthEndpoints } = require("@/lib/health-config");
     const endpoints = getHealthEndpoints();
-    expect(endpoints).toHaveLength(0);
+    // Falls back to hardcoded defaults (3 endpoints)
+    expect(endpoints.length).toBeGreaterThan(0);
+    expect(endpoints[0].componentId).toBe("monitor-infra-status");
   });
 });

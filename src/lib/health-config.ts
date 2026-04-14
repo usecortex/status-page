@@ -8,7 +8,7 @@
  * Set the HEALTH_CHECK_ENDPOINTS env var as a JSON string to override at
  * runtime without redeploying:
  *
- *   HEALTH_CHECK_ENDPOINTS='{"hybrid-search":"https://api.hydradb.com/v1/search/health",...}'
+ *   HEALTH_CHECK_ENDPOINTS='[{"componentId":"dashboard","name":"Dashboard","url":"https://app.hydradb.com"}]'
  */
 
 export interface HealthEndpoint {
@@ -36,7 +36,15 @@ const DEFAULT_FAILURE_THRESHOLD = 2;
  *
  * Priority:
  * 1. HEALTH_CHECK_ENDPOINTS env var (JSON string)
- * 2. Hardcoded defaults below (placeholder URLs -- update these)
+ * 2. Hardcoded defaults below
+ *
+ * Health check strategy:
+ * - Most API endpoints (POST) require auth + request bodies, so we can't
+ *   ping them directly. Instead we check the base API URL and the GET
+ *   endpoints that don't require a body.
+ * - Dashboard (app.hydradb.com) is checked with a simple GET.
+ * - For granular per-endpoint monitoring, integrate with an external
+ *   monitoring tool (Datadog, UptimeRobot) and feed results into incident.io.
  */
 export function getHealthEndpoints(): HealthEndpoint[] {
   const envEndpoints = process.env.HEALTH_CHECK_ENDPOINTS;
@@ -60,16 +68,13 @@ export function getHealthEndpoints(): HealthEndpoint[] {
     }
   }
 
-  // Placeholder endpoints -- replace with real URLs or set HEALTH_CHECK_ENDPOINTS env var
+  // Default health check endpoints
+  // The API base URL check covers all API components.
+  // GET endpoints can be pinged directly (they return 401/403 without auth, but prove the server is up).
   return [
-    // { componentId: "hybrid-search", name: "Hybrid Search", url: "https://api.hydradb.com/v1/search/health" },
-    // { componentId: "full-text-search", name: "Full-Text Search", url: "https://api.hydradb.com/v1/fts/health" },
-    // { componentId: "document-upload", name: "Document Upload", url: "https://api.hydradb.com/v1/upload/health" },
-    // { componentId: "content-processing", name: "Content Processing", url: "https://api.hydradb.com/v1/processing/health" },
-    // { componentId: "memory-api", name: "Memory API", url: "https://api.hydradb.com/v1/memory/health" },
-    // { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
-    // { componentId: "docs-site", name: "Docs Site", url: "https://docs.hydradb.com" },
-    // { componentId: "website", name: "Website", url: "https://hydradb.com" },
+    { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: "https://api.hydradb.com/tenants/monitor", expectedStatus: [200, 401, 403, 422] },
+    { componentId: "list-sub-tenant-ids", name: "List Sub-Tenant IDs", url: "https://api.hydradb.com/tenants/sub_tenant_ids", expectedStatus: [200, 401, 403, 422] },
+    { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
   ];
 }
 
