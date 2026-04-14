@@ -149,6 +149,19 @@ describe("mapComponentStatuses", () => {
     expect(result.get("hybrid-search")).toBe("operational");
   });
 
+  it("normalizes all status variants correctly", () => {
+    const widgetComponents = [
+      { name: "Hybrid Search", status: "partial_outage" },
+      { name: "Ingestion API", status: "full_outage" },
+      { name: "Vector Store", status: "under_maintenance" },
+    ];
+    const defaultIds = ["hybrid-search", "ingestion-api", "vector-store"];
+    const result = mapComponentStatuses(widgetComponents, defaultIds);
+    expect(result.get("hybrid-search")).toBe("outage");
+    expect(result.get("ingestion-api")).toBe("outage");
+    expect(result.get("vector-store")).toBe("maintenance");
+  });
+
   it("does not match via loose substring matching", () => {
     const widgetComponents = [
       { name: "Hybrid Search Extended", status: "degraded_performance" },
