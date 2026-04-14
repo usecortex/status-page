@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { StatusSnapshot, DurationDays } from "@/types/status";
 import { DEFAULT_COMPONENT_GROUPS } from "@/lib/defaults";
+import { sectionHeadingStyle } from "@/lib/styles";
 import DurationSelector from "@/components/DurationSelector";
 import ComponentGroup from "@/components/ComponentGroup";
 import IncidentCard from "@/components/IncidentCard";
@@ -12,39 +13,19 @@ interface StatusPageProps {
   data: StatusSnapshot | null;
 }
 
+const STATUS_DISPLAY: Record<string, { label: string; bg: string }> = {
+  operational: { label: "All Systems Operational", bg: "var(--success-1)" },
+  degraded: { label: "Degraded Performance", bg: "var(--warning-1)" },
+  outage: { label: "Major Outage", bg: "var(--error-1)" },
+  maintenance: { label: "Scheduled Maintenance In Progress", bg: "var(--blue)" },
+};
+
 function getOverallStatusDisplay(status: string): { label: string; color: string; bg: string } {
-  switch (status) {
-    case "operational":
-      return {
-        label: "All Systems Operational",
-        color: "#fff",
-        bg: "var(--success-1)",
-      };
-    case "degraded":
-      return {
-        label: "Degraded Performance",
-        color: "#fff",
-        bg: "var(--warning-1)",
-      };
-    case "outage":
-      return {
-        label: "Major Outage",
-        color: "#fff",
-        bg: "var(--error-1)",
-      };
-    case "maintenance":
-      return {
-        label: "Scheduled Maintenance In Progress",
-        color: "#fff",
-        bg: "var(--blue)",
-      };
-    default:
-      return {
-        label: "Status Monitoring Is Being Set Up",
-        color: "var(--text-70)",
-        bg: "var(--ui-1)",
-      };
+  const entry = STATUS_DISPLAY[status];
+  if (entry) {
+    return { ...entry, color: "#fff" };
   }
+  return { label: "Status Monitoring Is Being Set Up", color: "var(--text-70)", bg: "var(--ui-1)" };
 }
 
 function formatLastUpdated(iso: string): string {
@@ -162,15 +143,7 @@ export default function StatusPage({ data }: StatusPageProps) {
           marginBottom: "12px",
         }}
       >
-        <span
-          style={{
-            fontSize: "13px",
-            fontWeight: 600,
-            color: "var(--text-70)",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-          }}
-        >
+        <span style={sectionHeadingStyle}>
           System Status
         </span>
         <span
@@ -190,7 +163,6 @@ export default function StatusPage({ data }: StatusPageProps) {
             key={group.id}
             group={group}
             duration={duration}
-            incidents={incidents}
           />
         ))}
       </div>
@@ -198,16 +170,7 @@ export default function StatusPage({ data }: StatusPageProps) {
       {/* Active Incidents */}
       {incidents.length > 0 && (
         <div style={{ marginBottom: "32px" }}>
-          <div
-            style={{
-              fontSize: "13px",
-              fontWeight: 600,
-              color: "var(--text-70)",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginBottom: "12px",
-            }}
-          >
+          <div style={sectionHeadingStyle}>
             Active Incidents
           </div>
           {incidents.map((incident) => (
@@ -219,16 +182,7 @@ export default function StatusPage({ data }: StatusPageProps) {
       {/* Scheduled Maintenance */}
       {maintenanceWindows.length > 0 && (
         <div style={{ marginBottom: "32px" }}>
-          <div
-            style={{
-              fontSize: "13px",
-              fontWeight: 600,
-              color: "var(--text-70)",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginBottom: "12px",
-            }}
-          >
+          <div style={sectionHeadingStyle}>
             Scheduled Maintenance
           </div>
           {maintenanceWindows.map((mw) => (

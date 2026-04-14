@@ -5,7 +5,6 @@ describe("normalizeWidgetResponse", () => {
     const result = normalizeWidgetResponse(null);
     expect(result.incidents).toEqual([]);
     expect(result.maintenance_windows).toEqual([]);
-    expect(result.component_statuses.size).toBe(0);
   });
 
   it("returns empty data for empty object", () => {
@@ -64,22 +63,6 @@ describe("normalizeWidgetResponse", () => {
     expect(result.maintenance_windows.map(m => m.id)).toEqual(["maint_1", "maint_2"]);
   });
 
-  it("normalizes component statuses", () => {
-    const raw = {
-      components: [
-        { id: "hybrid-search", name: "Hybrid Search", status: "operational" },
-        { id: "ingestion-api", name: "Ingestion API", status: "degraded_performance" },
-        { id: "vector-store", name: "Vector Store", status: "partial_outage" },
-        { id: "dashboard", name: "Dashboard", status: "under_maintenance" },
-      ],
-    };
-    const result = normalizeWidgetResponse(raw);
-    expect(result.component_statuses.get("hybrid-search")).toBe("operational");
-    expect(result.component_statuses.get("ingestion-api")).toBe("degraded");
-    expect(result.component_statuses.get("vector-store")).toBe("outage");
-    expect(result.component_statuses.get("dashboard")).toBe("maintenance");
-  });
-
   it("extracts updates from last_update string fallback", () => {
     const raw = {
       ongoing_incidents: [
@@ -112,6 +95,24 @@ describe("normalizeWidgetResponse", () => {
     };
     const result = normalizeWidgetResponse(raw);
     expect(result.incidents[0].updates[0].body).toBe("Investigating root cause");
+  });
+
+  it("extracts component_id from affected_components", () => {
+    const raw = {
+      ongoing_incidents: [
+        {
+          id: "inc_5",
+          name: "Test",
+          status: "investigating",
+          started_at: "2026-04-14T10:00:00Z",
+          affected_components: [
+            { component_id: "comp_abc123", name: "Hybrid Search", status: "partial_outage" },
+          ],
+        },
+      ],
+    };
+    const result = normalizeWidgetResponse(raw);
+    expect(result.incidents[0].components).toEqual(["comp_abc123"]);
   });
 });
 
@@ -146,5 +147,15 @@ describe("mapComponentStatuses", () => {
     const defaultIds = ["hybrid-search"];
     const result = mapComponentStatuses(widgetComponents, defaultIds);
     expect(result.get("hybrid-search")).toBe("operational");
+  });
+
+  it("does not match via loose substring matching", () => {
+    const widgetComponents = [
+      { name: "Hybrid Search Extended", status: "degraded_performance" },
+    ];
+    const defaultIds = ["hybrid-search"];
+    const result = mapComponentStatuses(widgetComponents, defaultIds);
+    // Should NOT match because "hybrid search extended" !== "hybrid search"
+    expect(result.has("hybrid-search")).toBe(false);
   });
 });

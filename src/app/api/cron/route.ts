@@ -17,8 +17,12 @@ import type { StatusSnapshot } from "@/types/status";
 export async function GET(request: Request): Promise<NextResponse> {
   try {
     // 1. Verify authorization (Vercel sets this header for cron jobs)
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret) {
+      return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 500 });
+    }
     const authHeader = request.headers.get("authorization");
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -38,6 +42,50 @@ export async function GET(request: Request): Promise<NextResponse> {
           DEFAULT_COMPONENTS.map((c) => c.id),
         );
 
+        // Build reverse lookup: incident.io widget component ID -> our internal ID.
+        // This allows us to remap incident component IDs to our internal IDs so
+        // that computeDailyUptime can correctly match incidents to components.
+        const reverseComponentMap = new Map<string, string>();
+        if (Array.isArray(raw.components)) {
+          for (const comp of raw.components) {
+            const widgetId = comp?.id ?? "";
+            const widgetName = (comp?.name ?? "").toLowerCase().replace(/\s+/g, "-");
+            for (const [internalId] of componentStatuses.entries()) {
+              const internalName = internalId.toLowerCase();
+              if (widgetName === internalName || widgetId.toLowerCase() === internalName) {
+                reverseComponentMap.set(widgetId, internalId);
+                break;
+              }
+            }
+          }
+        }
+
+        // Remap incident component IDs to our internal IDs
+        const remappedIncidents = normalized.incidents.map(inc => ({
+          ...inc,
+          components: inc.components.map(c => reverseComponentMap.get(c) ?? c),
+        }));
+
+        // Override component statuses based on active incidents.
+        // If an incident is "investigating" or "identified" and affects a
+        // component, that component should show as "outage". If "degraded",
+        // it should show as "degraded".
+        for (const inc of remappedIncidents) {
+          if (!inc.components || inc.components.length === 0) continue;
+          const incStatus = inc.status === "investigating" || inc.status === "identified"
+            ? "outage"
+            : inc.status === "degraded" ? "degraded" : null;
+          if (incStatus) {
+            for (const compId of inc.components) {
+              const current = componentStatuses.get(compId);
+              // Only override if the incident status is worse
+              if (!current || current === "operational" || (current === "degraded" && incStatus === "outage")) {
+                componentStatuses.set(compId, incStatus);
+              }
+            }
+          }
+        }
+
         // 5. Build updated component groups
         const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
         const baseGroups =
@@ -51,7 +99,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
             // Compute today's uptime from active incidents
             const todayUptime = computeDailyUptime(
-              normalized.incidents,
+              remappedIncidents,
               comp.id,
               today,
             );
@@ -80,10 +128,10 @@ export async function GET(request: Request): Promise<NextResponse> {
           configured: true,
           overall_status: deriveOverallStatus(
             updatedGroups,
-            normalized.incidents,
+            remappedIncidents,
           ),
           component_groups: updatedGroups,
-          incidents: normalized.incidents,
+          incidents: remappedIncidents,
           maintenance_windows: normalized.maintenance_windows,
         };
 
@@ -94,7 +142,7 @@ export async function GET(request: Request): Promise<NextResponse> {
           ok: true,
           configured: true,
           components_updated: updatedGroups.flatMap((g) => g.components).length,
-          incidents: normalized.incidents.length,
+          incidents: remappedIncidents.length,
           maintenance: normalized.maintenance_windows.length,
         });
       }

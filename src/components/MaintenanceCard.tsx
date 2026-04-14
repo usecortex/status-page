@@ -1,6 +1,8 @@
 "use client";
 
 import { MaintenanceWindow } from "@/types/status";
+import { formatDate } from "@/lib/format";
+import { cardStyle } from "@/lib/styles";
 
 interface MaintenanceCardProps {
   maintenance: MaintenanceWindow;
@@ -17,15 +19,6 @@ function getStatusBadgeColor(status: string): { bg: string; text: string } {
   }
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function formatStatusLabel(status: string): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -34,15 +27,7 @@ export default function MaintenanceCard({ maintenance }: MaintenanceCardProps) {
   const badgeColors = getStatusBadgeColor(maintenance.status);
 
   return (
-    <div
-      style={{
-        backgroundColor: "var(--ui-1)",
-        border: "1px solid var(--border)",
-        borderRadius: "10px",
-        padding: "16px 20px",
-        marginBottom: "8px",
-      }}
-    >
+    <div style={cardStyle}>
       {/* Header */}
       <div
         style={{

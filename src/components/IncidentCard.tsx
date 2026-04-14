@@ -1,6 +1,8 @@
 "use client";
 
 import { Incident } from "@/types/status";
+import { formatDate } from "@/lib/format";
+import { cardStyle } from "@/lib/styles";
 
 interface IncidentCardProps {
   incident: Incident;
@@ -20,28 +22,11 @@ function getStatusBadgeColor(status: string): { bg: string; text: string } {
   }
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export default function IncidentCard({ incident }: IncidentCardProps) {
   const badgeColors = getStatusBadgeColor(incident.status);
 
   return (
-    <div
-      style={{
-        backgroundColor: "var(--ui-1)",
-        border: "1px solid var(--border)",
-        borderRadius: "10px",
-        padding: "16px 20px",
-        marginBottom: "8px",
-      }}
-    >
+    <div style={cardStyle}>
       {/* Header */}
       <div
         style={{

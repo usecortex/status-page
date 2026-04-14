@@ -1,13 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { ComponentGroup as ComponentGroupType, DurationDays, Incident } from "@/types/status";
+import { ComponentGroup as ComponentGroupType, DurationDays } from "@/types/status";
 import UptimeBar from "@/components/UptimeBar";
+import { cardStyle } from "@/lib/styles";
 
 interface ComponentGroupProps {
   group: ComponentGroupType;
   duration: DurationDays;
-  incidents: Incident[];
 }
 
 function getStatusColor(status: string): string {
@@ -27,9 +27,11 @@ function getStatusColor(status: string): string {
   }
 }
 
+/** Status priority order — worst first. Shared by getWorstStatus and getMergedDailyHistory. */
+const STATUS_PRIORITY = ["outage", "investigating", "identified", "degraded", "maintenance", "operational"];
+
 function getWorstStatus(statuses: string[]): string {
-  const priority = ["outage", "investigating", "identified", "degraded", "maintenance", "operational"];
-  for (const p of priority) {
+  for (const p of STATUS_PRIORITY) {
     if (statuses.includes(p)) return p;
   }
   return "operational";
@@ -60,8 +62,7 @@ function getMergedDailyHistory(group: ComponentGroupType) {
       if (existing) {
         existing.total += day.uptime_pct;
         existing.count += 1;
-        const priority = ["outage", "investigating", "identified", "degraded", "maintenance", "operational"];
-        if (priority.indexOf(day.status) < priority.indexOf(existing.worstStatus)) {
+        if (STATUS_PRIORITY.indexOf(day.status) < STATUS_PRIORITY.indexOf(existing.worstStatus)) {
           existing.worstStatus = day.status;
         }
       } else {
@@ -86,15 +87,7 @@ export default function ComponentGroup({ group, duration }: ComponentGroupProps)
   const dailyHistory = getMergedDailyHistory(group);
 
   return (
-    <div
-      style={{
-        backgroundColor: "var(--ui-1)",
-        border: "1px solid var(--border)",
-        borderRadius: "10px",
-        padding: "16px 20px",
-        marginBottom: "8px",
-      }}
-    >
+    <div style={cardStyle}>
       {/* Header row */}
       <div
         onClick={isExpandable ? () => setExpanded(!expanded) : undefined}

@@ -55,13 +55,21 @@ describe("GET /api/cron", () => {
     process.env = { ...ORIGINAL_ENV, CRON_SECRET: "test-secret" };
   });
 
-  afterAll(() => {
+  afterEach(() => {
     process.env = ORIGINAL_ENV;
   });
 
   // -----------------------------------------------------------------------
   // Auth
   // -----------------------------------------------------------------------
+
+  it("returns 500 when CRON_SECRET is not configured", async () => {
+    delete process.env.CRON_SECRET;
+    const res = await GET(makeRequest({ authorization: "Bearer anything" }));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("CRON_SECRET not configured");
+  });
 
   it("returns 401 when authorization header is missing", async () => {
     const res = await GET(makeRequest());
@@ -127,7 +135,6 @@ describe("GET /api/cron", () => {
     mockNormalizeWidgetResponse.mockReturnValue({
       incidents: [],
       maintenance_windows: [],
-      component_statuses: new Map(),
     });
     mockMapComponentStatuses.mockReturnValue(new Map());
     mockWriteStatusData.mockResolvedValue(undefined);

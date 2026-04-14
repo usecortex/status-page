@@ -78,10 +78,11 @@ export function deriveDayStatus(uptime_pct: number): string {
  *  1. Filter incidents that affect this component (explicitly listed in
  *     `incident.components`, or the array is empty/undefined – meaning
  *     it affects all components).
- *  2. For each matching incident compute the overlap (in minutes) between
+ *  2. Only incidents with a "down" status count as downtime.
+ *  3. For each matching incident compute the overlap (in minutes) between
  *     the incident's active window and the 24-hour window of `date` in UTC.
- *  3. Sum total down-minutes (capped at 1440).
- *  4. Derive uptime_pct and status.
+ *  4. Sum total down-minutes (capped at 1440).
+ *  5. Derive uptime_pct and status.
  */
 export function computeDailyUptime(
   incidents: Incident[],
@@ -90,14 +91,17 @@ export function computeDailyUptime(
 ): DailyUptime {
   // Build the UTC boundaries for the given day.
   const dayStart = new Date(`${date}T00:00:00Z`).getTime();
-  const dayEnd = new Date(`${date}T23:59:59Z`).getTime();
+  const nextDay = new Date(`${date}T00:00:00Z`);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const dayEnd = nextDay.getTime();
 
-  // Filter incidents relevant to this component.
+  // Filter incidents relevant to this component that have a "down" status.
   // Unscoped incidents (no components array) only affect the overall status
   // banner, not individual component uptime calculations.
   const relevant = incidents.filter((inc) => {
     if (!inc.components || inc.components.length === 0) return false;
-    return inc.components.includes(componentId);
+    if (!inc.components.includes(componentId)) return false;
+    return isDownStatus(inc.status);
   });
 
   // Short-circuit: no relevant incidents → perfect day.

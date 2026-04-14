@@ -52,12 +52,12 @@ describe("computeDailyUptime", () => {
     expect(result.uptime_pct).toBe(100);
   });
 
-  it("computes partial downtime for a resolved incident", () => {
+  it("computes partial downtime for a resolved incident with down status", () => {
     // 2 hours of downtime = 120 minutes out of 1440
     const incidents: Incident[] = [{
       id: "inc_1",
       name: "Test",
-      status: "resolved",
+      status: "investigating",
       started_at: "2026-04-14T10:00:00Z",
       resolved_at: "2026-04-14T12:00:00Z",
       components: ["hybrid-search"],
@@ -100,7 +100,7 @@ describe("computeDailyUptime", () => {
     const incidents: Incident[] = [{
       id: "inc_1",
       name: "Multi-day",
-      status: "resolved",
+      status: "investigating",
       started_at: "2026-04-13T20:00:00Z",
       resolved_at: "2026-04-14T06:00:00Z",
       components: ["hybrid-search"],
@@ -110,6 +110,36 @@ describe("computeDailyUptime", () => {
     // 6 hours = 360 minutes down out of 1440
     expect(result.uptime_pct).toBe(75);
     expect(result.status).toBe("outage");
+  });
+
+  it("does not count resolved/watching incidents as downtime", () => {
+    // An incident with status "resolved" should NOT count as downtime
+    const incidents: Incident[] = [{
+      id: "inc_1",
+      name: "Resolved Issue",
+      status: "resolved",
+      started_at: "2026-04-14T10:00:00Z",
+      resolved_at: "2026-04-14T12:00:00Z",
+      components: ["hybrid-search"],
+      updates: [],
+    }];
+    const result = computeDailyUptime(incidents, "hybrid-search", "2026-04-14");
+    expect(result.uptime_pct).toBe(100);
+    expect(result.status).toBe("operational");
+  });
+
+  it("does not count watching incidents as downtime", () => {
+    const incidents: Incident[] = [{
+      id: "inc_1",
+      name: "Watching Issue",
+      status: "watching",
+      started_at: "2026-04-14T10:00:00Z",
+      components: ["hybrid-search"],
+      updates: [],
+    }];
+    const result = computeDailyUptime(incidents, "hybrid-search", "2026-04-14");
+    expect(result.uptime_pct).toBe(100);
+    expect(result.status).toBe("operational");
   });
 });
 

@@ -16,13 +16,6 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `document.documentElement.classList.add('dark')`,
-          }}
-        />
-      </head>
       <body className={inter.className}>{children}</body>
     </html>
   );
