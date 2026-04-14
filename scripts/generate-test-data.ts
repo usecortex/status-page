@@ -69,10 +69,6 @@ const incidentPatterns: Record<string, Map<number, number>> = {
     [45, 95.2],   // affected by same incident as hybrid-search
     [44, 99.1],
   ]),
-  "qna": new Map([
-    [60, 98.5],   // degraded 60 days ago
-    [30, 99.1],   // minor issue 30 days ago
-  ]),
   "document-upload": new Map([
     [80, 93.2],   // outage 80 days ago
     [79, 97.5],
@@ -99,7 +95,6 @@ const incidentPatterns: Record<string, Map<number, number>> = {
 const components: StatusComponent[] = [
   { id: "hybrid-search", name: "Hybrid Search", status: "operational" },
   { id: "full-text-search", name: "Full-Text Search", status: "operational" },
-  { id: "qna", name: "QnA", status: "operational" },
   { id: "document-upload", name: "Document Upload", status: "operational" },
   { id: "content-processing", name: "Content Processing", status: "operational" },
   { id: "memory-api", name: "Memory API", status: "degraded" },  // currently degraded
@@ -120,7 +115,7 @@ const components: StatusComponent[] = [
 });
 
 const groups: ComponentGroup[] = [
-  { id: "query-retrieval", name: "Query & Retrieval", components: components.filter(c => ["hybrid-search", "full-text-search", "qna"].includes(c.id)) },
+  { id: "query-retrieval", name: "Query & Retrieval", components: components.filter(c => ["hybrid-search", "full-text-search"].includes(c.id)) },
   { id: "knowledge-ingestion", name: "Knowledge Ingestion", components: components.filter(c => ["document-upload", "content-processing"].includes(c.id)) },
   { id: "memories", name: "Memories", components: components.filter(c => c.id === "memory-api") },
   { id: "dashboard", name: "Dashboard", components: components.filter(c => c.id === "dashboard") },
