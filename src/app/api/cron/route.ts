@@ -4,6 +4,7 @@ import {
   fetchWidgetData,
   normalizeWidgetResponse,
   mapComponentStatuses,
+  normalizeName,
 } from "@/lib/incident-io";
 import {
   computeDailyUptime,
@@ -51,15 +52,28 @@ export async function GET(request: Request): Promise<NextResponse> {
         // that computeDailyUptime can correctly match incidents to components.
         const reverseComponentMap = new Map<string, string>();
         if (Array.isArray(raw.components)) {
+          // Build lookup from internal IDs: both raw and normalized forms
+          const internalLookup = new Map<string, string>();
+          for (const [internalId] of componentStatuses.entries()) {
+            internalLookup.set(internalId.toLowerCase(), internalId);
+            // Also index the space-separated form for normalizeName matching
+            internalLookup.set(internalId.replace(/-/g, " ").toLowerCase(), internalId);
+          }
+
           for (const comp of raw.components) {
             const widgetId = comp?.id ?? "";
-            const widgetName = (comp?.name ?? "").toLowerCase().replace(/\s+/g, "-");
-            for (const [internalId] of componentStatuses.entries()) {
-              const internalName = internalId.toLowerCase();
-              if (widgetName === internalName || widgetId.toLowerCase() === internalName) {
-                reverseComponentMap.set(widgetId, internalId);
-                break;
-              }
+            // Normalize: strip & / punctuation, collapse whitespace, then
+            // try both space-separated and hyphenated forms
+            const normalized = normalizeName(comp?.name ?? "");
+            const hyphenated = normalized.replace(/\s+/g, "-");
+
+            const match =
+              internalLookup.get(normalized) ??
+              internalLookup.get(hyphenated) ??
+              internalLookup.get(widgetId.toLowerCase());
+
+            if (match) {
+              reverseComponentMap.set(widgetId, match);
             }
           }
         }

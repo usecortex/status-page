@@ -225,7 +225,7 @@ export function normalizeWidgetResponse(raw: any): NormalizedWidgetData {
  *   "Shared / Hive Memory"   → "shared hive memory"
  *   "List Sub-Tenant IDs"    → "list sub-tenant ids"
  */
-function normalizeName(name: string): string {
+export function normalizeName(name: string): string {
   return name
     .toLowerCase()
     .replace(/[&/]/g, " ")
