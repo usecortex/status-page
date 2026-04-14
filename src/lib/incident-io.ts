@@ -217,21 +217,46 @@ export function normalizeWidgetResponse(raw: any): NormalizedWidgetData {
 // ---------------------------------------------------------------------------
 
 /**
+ * Normalise a display name for fuzzy matching: lowercase, strip punctuation
+ * characters (`&`, `/`), collapse whitespace, and trim.
+ *
+ * Examples:
+ *   "Monitor & Infra Status" → "monitor infra status"
+ *   "Shared / Hive Memory"   → "shared hive memory"
+ *   "List Sub-Tenant IDs"    → "list sub-tenant ids"
+ */
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[&/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Maps incident.io widget component data to our component IDs with normalised
  * statuses.
  *
- * Matching is performed case-insensitively: if a widget component's `name`
- * matches one of the names derived from `defaultGroupIds` (treating the ID as
- * a kebab-case name), we include it. Only exact matches are used (no loose
- * substring matching) to avoid incorrect mappings.
+ * Matching is performed case-insensitively. The lookup is built from:
+ *   1. The raw component ID (lowercased)
+ *   2. A space-separated form of the ID (hyphens → spaces)
+ *   3. Display names from `componentNames` (if provided), normalised to strip
+ *      punctuation like `&` and `/` so "Monitor & Infra Status" matches
+ *      "monitor infra status".
+ *
+ * Only exact normalised matches are used (no loose substring matching) to
+ * avoid incorrect mappings.
  *
  * @param widgetComponents - The `components` array from the Widget API response.
  * @param defaultGroupIds  - Our internal component IDs (e.g. from defaults.ts).
+ * @param componentNames   - Optional map of component ID → display name for
+ *                           richer matching (e.g. from DEFAULT_COMPONENTS).
  * @returns A `Map<componentId, status>` with statuses in our vocabulary.
  */
 export function mapComponentStatuses(
   widgetComponents: any[],
   defaultGroupIds: string[],
+  componentNames?: Map<string, string>,
 ): Map<string, string> {
   const result = new Map<string, string>();
 
@@ -239,21 +264,25 @@ export function mapComponentStatuses(
     return result;
   }
 
-  // Build a lookup: lowercase name -> our component ID
-  // We derive a display-style name from each ID by replacing hyphens with
-  // spaces so "hybrid-search" becomes "hybrid search".
+  // Build a lookup: normalised name -> our component ID
   const idLookup = new Map<string, string>();
   for (const id of defaultGroupIds) {
+    // Raw id (lowercased)
+    idLookup.set(id.toLowerCase(), id);
+    // Hyphen-to-space form: "monitor-infra-status" → "monitor infra status"
     const friendlyName = id.replace(/-/g, " ").toLowerCase();
     idLookup.set(friendlyName, id);
-    // Also store the raw id (lowercased) so exact matches work.
-    idLookup.set(id.toLowerCase(), id);
+    // Display name from componentNames (handles punctuation like & and /)
+    const displayName = componentNames?.get(id);
+    if (displayName) {
+      idLookup.set(normalizeName(displayName), id);
+    }
   }
 
   for (const comp of widgetComponents) {
     if (!comp) continue;
 
-    const widgetName = (comp.name ?? comp.id ?? "").toLowerCase().trim();
+    const widgetName = normalizeName(comp.name ?? comp.id ?? "");
     if (!widgetName) continue;
 
     // Direct match only — no loose substring matching.

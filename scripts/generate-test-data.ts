@@ -93,36 +93,19 @@ const incidentPatterns: Record<string, Map<number, number>> = {
   ]),
 };
 
-const componentDefs = [
-  // Tenants
-  { id: "create-tenant", name: "Create Tenant", status: "operational" },
-  { id: "monitor-infra-status", name: "Monitor & Infra Status", status: "operational" },
-  { id: "list-sub-tenant-ids", name: "List Sub-Tenant IDs", status: "operational" },
-  { id: "delete-tenant", name: "Delete Tenant", status: "operational" },
-  // Memories
-  { id: "user-memory", name: "User Memory", status: "degraded" },
-  { id: "knowledge-base", name: "Knowledge Base", status: "operational" },
-  { id: "shared-hive-memory", name: "Shared / Hive Memory", status: "operational" },
-  // Recall
-  { id: "full-recall", name: "Full Recall", status: "operational" },
-  { id: "memory-recall", name: "Memory Recall", status: "operational" },
-  { id: "lexical-recall", name: "Lexical Recall", status: "operational" },
-  // Ingestion
-  { id: "verify-processing", name: "Verify Processing", status: "operational" },
-  // Manage Memories
-  { id: "list-data", name: "List", status: "operational" },
-  { id: "fetch-content", name: "Fetch Content", status: "operational" },
-  { id: "graph-relations", name: "Graph Relations", status: "operational" },
-  { id: "delete-user-memory", name: "Delete User Memory", status: "operational" },
-  { id: "delete-knowledge", name: "Delete Knowledge", status: "operational" },
-  // Custom Embeddings
-  { id: "add-embeddings", name: "Add Embeddings", status: "operational" },
-  { id: "search-embeddings", name: "Search Embeddings", status: "operational" },
-  { id: "filter-raw-embeddings", name: "Filter Raw Embeddings", status: "operational" },
-  { id: "delete-embeddings", name: "Delete Embeddings", status: "operational" },
-  // Dashboard
-  { id: "dashboard", name: "Dashboard", status: "operational" },
-];
+// Import component definitions from the single source of truth in defaults.ts.
+// We use require() because this script runs with ts-node in CommonJS mode.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { DEFAULT_COMPONENTS, DEFAULT_COMPONENT_GROUPS } = require("../src/lib/defaults");
+
+const componentDefs: Array<{ id: string; name: string; status: string }> = (DEFAULT_COMPONENTS as Array<{ id: string; name: string }>).map(
+  (c: { id: string; name: string }) => ({
+    id: c.id,
+    name: c.name,
+    // Override status for test scenario: user-memory shows as degraded
+    status: c.id === "user-memory" ? "degraded" : "operational",
+  }),
+);
 
 const components: StatusComponent[] = componentDefs.map(c => {
   const history = generateDailyHistory(90, incidentPatterns[c.id] || new Map());
@@ -137,15 +120,18 @@ const components: StatusComponent[] = componentDefs.map(c => {
   };
 });
 
-const groups: ComponentGroup[] = [
-  { id: "tenants", name: "Tenants", components: components.filter(c => ["create-tenant", "monitor-infra-status", "list-sub-tenant-ids", "delete-tenant"].includes(c.id)) },
-  { id: "memories", name: "Memories", components: components.filter(c => ["user-memory", "knowledge-base", "shared-hive-memory"].includes(c.id)) },
-  { id: "recall", name: "Recall", components: components.filter(c => ["full-recall", "memory-recall", "lexical-recall"].includes(c.id)) },
-  { id: "ingestion", name: "Ingestion", components: components.filter(c => ["verify-processing"].includes(c.id)) },
-  { id: "manage-memories", name: "Manage Memories", components: components.filter(c => ["list-data", "fetch-content", "graph-relations", "delete-user-memory", "delete-knowledge"].includes(c.id)) },
-  { id: "custom-embeddings", name: "Custom Embeddings", components: components.filter(c => ["add-embeddings", "search-embeddings", "filter-raw-embeddings", "delete-embeddings"].includes(c.id)) },
-  { id: "dashboard", name: "Dashboard", components: components.filter(c => c.id === "dashboard") },
-];
+// Derive groups from DEFAULT_COMPONENT_GROUPS, replacing component definitions
+// with the enriched versions that include daily_history and uptime metrics.
+const componentById = new Map(components.map(c => [c.id, c]));
+const groups: ComponentGroup[] = (DEFAULT_COMPONENT_GROUPS as ComponentGroup[]).map(
+  (group: ComponentGroup) => ({
+    id: group.id,
+    name: group.name,
+    components: group.components
+      .map((c: { id: string }) => componentById.get(c.id))
+      .filter((c: StatusComponent | undefined): c is StatusComponent => !!c),
+  }),
+);
 
 // Create a recent active incident on User Memory
 const now = new Date();

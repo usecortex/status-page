@@ -1,19 +1,38 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import type { S3ClientConfig } from "@aws-sdk/client-s3";
 import type { StatusSnapshot } from "@/types/status";
 
 const STATUS_FILE_KEY = "status.json";
 
-function getS3Client(): S3Client {
-  return new S3Client({
-    region: process.env.S3_REGION || "us-east-1",
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-    },
-  });
+// ---------------------------------------------------------------------------
+// Shared S3 helpers — also used by health-state.ts
+// ---------------------------------------------------------------------------
+
+let _s3Client: S3Client | null = null;
+
+/**
+ * Returns a lazily-initialised S3Client singleton.
+ * Credentials are only injected when the corresponding env vars are present,
+ * allowing the AWS SDK to fall back to instance-profile / IRSA credentials
+ * in environments that provide them automatically.
+ */
+export function getS3Client(): S3Client {
+  if (!_s3Client) {
+    const config: S3ClientConfig = {
+      region: process.env.S3_REGION || "us-east-1",
+    };
+    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      config.credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      };
+    }
+    _s3Client = new S3Client(config);
+  }
+  return _s3Client;
 }
 
-function getBucketName(): string {
+export function getBucketName(): string {
   return process.env.S3_BUCKET_NAME || "hydradb-status-page-data";
 }
 

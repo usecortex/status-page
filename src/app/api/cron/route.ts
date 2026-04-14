@@ -37,9 +37,13 @@ export async function GET(request: Request): Promise<NextResponse> {
       const raw = await fetchWidgetData(widgetUrl);
       if (raw) {
         const normalized = normalizeWidgetResponse(raw);
+        const componentNameMap = new Map(
+          DEFAULT_COMPONENTS.map((c) => [c.id, c.name] as [string, string]),
+        );
         const componentStatuses = mapComponentStatuses(
           raw.components || [],
           DEFAULT_COMPONENTS.map((c) => c.id),
+          componentNameMap,
         );
 
         // Build reverse lookup: incident.io widget component ID -> our internal ID.
@@ -88,8 +92,29 @@ export async function GET(request: Request): Promise<NextResponse> {
 
         // 5. Build updated component groups
         const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-        const baseGroups =
-          existing?.component_groups || DEFAULT_COMPONENT_GROUPS;
+
+        // Migration: always use DEFAULT_COMPONENT_GROUPS as the structural
+        // source of truth (which components exist and how they're grouped).
+        // Preserve historical uptime data for components that carry over from
+        // a previous snapshot by building a lookup from the existing data.
+        const existingComponentMap = new Map<
+          string,
+          { daily_history: any[]; uptime: any; status: string }
+        >();
+        if (existing?.component_groups) {
+          for (const group of existing.component_groups) {
+            for (const comp of group.components) {
+              existingComponentMap.set(comp.id, comp);
+            }
+          }
+        }
+        const baseGroups = DEFAULT_COMPONENT_GROUPS.map((group) => ({
+          ...group,
+          components: group.components.map((comp) => {
+            const prev = existingComponentMap.get(comp.id);
+            return prev ? { ...comp, daily_history: prev.daily_history, uptime: prev.uptime, status: prev.status } : comp;
+          }),
+        }));
 
         const updatedGroups = baseGroups.map((group) => ({
           ...group,

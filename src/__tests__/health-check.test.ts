@@ -5,12 +5,7 @@ import { getFailureThreshold, getTimeout } from "@/lib/health-config";
 // Mock fetch globally
 const originalFetch = global.fetch;
 
-beforeEach(() => {
-  jest.useFakeTimers({ legacyFakeTimers: true });
-});
-
 afterEach(() => {
-  jest.useRealTimers();
   global.fetch = originalFetch;
   delete process.env.HEALTH_CHECK_ENDPOINTS;
 });
@@ -173,11 +168,7 @@ describe("checkEndpoint", () => {
 
 describe("runHealthChecks", () => {
   it("runs all checks concurrently", async () => {
-    let callCount = 0;
-    global.fetch = jest.fn().mockImplementation(() => {
-      callCount++;
-      return Promise.resolve({ status: 200, ok: true });
-    });
+    global.fetch = jest.fn().mockResolvedValue({ status: 200, ok: true });
 
     const endpoints: HealthEndpoint[] = [
       { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
@@ -187,7 +178,7 @@ describe("runHealthChecks", () => {
 
     const results = await runHealthChecks(endpoints);
     expect(results).toHaveLength(3);
-    expect(callCount).toBe(3);
+    expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(results.every((r) => r.healthy)).toBe(true);
   });
 

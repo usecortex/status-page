@@ -105,7 +105,6 @@ export async function createIncident(
       body: JSON.stringify({
         idempotency_key: params.idempotencyKey,
         visibility: "public",
-        incident_type_id: undefined,
         name: params.name,
         summary: params.summary,
         severity_id: params.severityId,

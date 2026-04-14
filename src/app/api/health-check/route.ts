@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getHealthEndpoints, getFailureThreshold } from "@/lib/health-config";
+import type { HealthEndpoint } from "@/lib/health-config";
 import { runHealthChecks } from "@/lib/health-check";
 import type { HealthCheckResult } from "@/lib/health-check";
 import {
@@ -49,7 +50,8 @@ export async function GET(request: Request): Promise<NextResponse> {
     const hasApiKey = !!process.env.INCIDENT_IO_API_KEY;
     let severityId: string | null = null;
 
-    // Lazy-load severity ID only if we need to create an incident
+    // Lazy-load severity ID only if we need to create an incident.
+    // Not cached on failure — will retry on next unhealthy component.
     const getSeverity = async (): Promise<string | null> => {
       if (severityId) return severityId;
       severityId = await findSeverityId("Minor");
@@ -68,12 +70,14 @@ export async function GET(request: Request): Promise<NextResponse> {
     for (const result of results) {
       const endpoint = endpoints.find(
         (e) => e.componentId === result.componentId,
-      )!;
+      );
+      if (!endpoint) continue;
       const prevState = getComponentState(existingState, result.componentId);
       const threshold = getFailureThreshold(endpoint);
 
       if (result.healthy) {
         // Component is healthy
+        let incidentCleared = true;
         if (prevState.activeIncidentId && hasApiKey) {
           // Resolve the open incident
           const resolved = await resolveIncident(prevState.activeIncidentId);
@@ -82,13 +86,19 @@ export async function GET(request: Request): Promise<NextResponse> {
             console.log(
               `[health-check] Resolved incident ${prevState.activeIncidentId} for ${result.name}`,
             );
+          } else {
+            // Resolution failed — keep incident reference so we retry next cycle
+            incidentCleared = false;
+            console.warn(
+              `[health-check] Failed to resolve incident ${prevState.activeIncidentId} for ${result.name}, will retry`,
+            );
           }
         }
 
         newState.components[result.componentId] = {
           consecutiveFailures: 0,
-          activeIncidentId: null,
-          incidentCreatedAt: null,
+          activeIncidentId: incidentCleared ? null : prevState.activeIncidentId,
+          incidentCreatedAt: incidentCleared ? null : prevState.incidentCreatedAt,
           lastCheckedAt: now,
           lastHealthy: true,
         };
@@ -106,7 +116,7 @@ export async function GET(request: Request): Promise<NextResponse> {
           if (sevId) {
             const incident = await createIncident({
               name: `${result.name} is experiencing issues`,
-              summary: buildIncidentSummary(result),
+              summary: buildIncidentSummary(result, endpoint),
               severityId: sevId,
               idempotencyKey: `health-check-${result.componentId}-${nowHour()}`,
             });
@@ -173,9 +183,15 @@ function nowHour(): string {
   return iso.slice(0, 13); // "2025-01-15T14"
 }
 
-function buildIncidentSummary(result: HealthCheckResult): string {
+function buildIncidentSummary(
+  result: HealthCheckResult,
+  endpoint: HealthEndpoint,
+): string {
   if (result.statusCode) {
-    return `Automated health check detected ${result.name} returning HTTP ${result.statusCode} (expected 2xx). Endpoint: ${result.url}`;
+    const expected = endpoint.expectedStatus
+      ? `expected ${endpoint.expectedStatus.join("/")}`
+      : "expected 2xx";
+    return `Automated health check detected ${result.name} returning HTTP ${result.statusCode} (${expected}). Endpoint: ${result.url}`;
   }
   return `Automated health check detected ${result.name} is unreachable: ${result.error}. Endpoint: ${result.url}`;
 }

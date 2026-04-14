@@ -5,8 +5,8 @@
  * so the health check cron can decide when to create/resolve incidents.
  */
 
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import type { S3ClientConfig } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getS3Client, getBucketName } from "./s3";
 
 const STATE_KEY = "health-state.json";
 
@@ -30,28 +30,11 @@ export interface HealthState {
   updatedAt: string;
 }
 
-function getS3Client(): S3Client {
-  const config: S3ClientConfig = {
-    region: process.env.S3_REGION || "us-east-1",
-  };
-  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-    config.credentials = {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    };
-  }
-  return new S3Client(config);
-}
-
-function getBucket(): string {
-  return process.env.S3_BUCKET_NAME || "hydradb-status-page-data";
-}
-
 export async function readHealthState(): Promise<HealthState | null> {
   try {
     const client = getS3Client();
     const command = new GetObjectCommand({
-      Bucket: getBucket(),
+      Bucket: getBucketName(),
       Key: STATE_KEY,
     });
     const response = await client.send(command);
@@ -71,7 +54,7 @@ export async function readHealthState(): Promise<HealthState | null> {
 export async function writeHealthState(state: HealthState): Promise<void> {
   const client = getS3Client();
   const command = new PutObjectCommand({
-    Bucket: getBucket(),
+    Bucket: getBucketName(),
     Key: STATE_KEY,
     Body: JSON.stringify(state, null, 2),
     ContentType: "application/json",
