@@ -78,10 +78,11 @@ export function deriveDayStatus(uptime_pct: number): string {
  *  1. Filter incidents that affect this component (explicitly listed in
  *     `incident.components`, or the array is empty/undefined – meaning
  *     it affects all components).
- *  2. For each matching incident compute the overlap (in minutes) between
+ *  2. Only incidents with a "down" status count as downtime.
+ *  3. For each matching incident compute the overlap (in minutes) between
  *     the incident's active window and the 24-hour window of `date` in UTC.
- *  3. Sum total down-minutes (capped at 1440).
- *  4. Derive uptime_pct and status.
+ *  4. Sum total down-minutes (capped at 1440).
+ *  5. Derive uptime_pct and status.
  */
 export function computeDailyUptime(
   incidents: Incident[],
@@ -90,13 +91,17 @@ export function computeDailyUptime(
 ): DailyUptime {
   // Build the UTC boundaries for the given day.
   const dayStart = new Date(`${date}T00:00:00Z`).getTime();
-  const dayEnd = new Date(`${date}T23:59:59Z`).getTime();
+  const nextDay = new Date(`${date}T00:00:00Z`);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const dayEnd = nextDay.getTime();
 
-  // Filter incidents relevant to this component.
+  // Filter incidents relevant to this component that have a "down" status.
+  // Unscoped incidents (no components array) only affect the overall status
+  // banner, not individual component uptime calculations.
   const relevant = incidents.filter((inc) => {
-    // If components list is empty or undefined, the incident affects all.
-    if (!inc.components || inc.components.length === 0) return true;
-    return inc.components.includes(componentId);
+    if (!inc.components || inc.components.length === 0) return false;
+    if (!inc.components.includes(componentId)) return false;
+    return isDownStatus(inc.status);
   });
 
   // Short-circuit: no relevant incidents → perfect day.
@@ -207,7 +212,16 @@ export function mergeHistoricalData(
   }
 
   // Overlay (or insert) fresh entries.
+  // When a date already exists, keep the worse (lower) uptime to avoid
+  // overwriting downtime recorded during an earlier cron run. This handles
+  // the case where an incident is active at 2pm (91% uptime computed) but
+  // resolved by 6pm (100% computed) -- we keep the 91%.
   for (const entry of freshEntries) {
+    const prev = map.get(entry.date);
+    if (prev && prev.uptime_pct < entry.uptime_pct) {
+      // Existing entry recorded worse uptime -- keep it.
+      continue;
+    }
     map.set(entry.date, entry);
   }
 
@@ -229,9 +243,10 @@ export function mergeHistoricalData(
  *
  * Priority (highest → lowest):
  *  1. Any incident with status "investigating" or "identified" → "outage"
- *  2. Any component with status "degraded" or "degraded_performance" → "degraded"
- *  3. Any component with status "maintenance" or "under_maintenance" → "maintenance"
- *  4. Otherwise → "operational"
+ *  2. Any component with status "outage" → "outage"
+ *  3. Any component with status "degraded" or "degraded_performance" → "degraded"
+ *  4. Any component with status "maintenance" or "under_maintenance" → "maintenance"
+ *  5. Otherwise → "operational"
  *
  * @param groups    - Component groups, each containing an array of components
  *                    with a `status` field.
@@ -256,7 +271,13 @@ export function deriveOverallStatus(
     }
   }
 
-  // 2. Check for degraded components.
+  // 2a. Check for components explicitly marked as outage (e.g. set by cron incident override
+  //     or mapped from incident.io full_outage/partial_outage when no active incident exists).
+  if (componentStatuses.some((s) => s === "outage")) {
+    return "outage";
+  }
+
+  // 2b. Check for degraded components.
   if (
     componentStatuses.some(
       (s) => s === "degraded" || s === "degraded_performance",

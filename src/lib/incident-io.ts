@@ -17,7 +17,6 @@ interface WidgetResponse {
 export interface NormalizedWidgetData {
   incidents: Incident[];
   maintenance_windows: MaintenanceWindow[];
-  component_statuses: Map<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,15 +112,19 @@ function extractUpdates(raw: any): IncidentUpdate[] {
 /**
  * Extracts component IDs/names from a raw incident's `affected_components` array.
  * Falls back to an empty array when the field is missing.
+ *
+ * Handles multiple incident.io payload shapes:
+ *   - `component_id` (primary key in incident.io REST payloads)
+ *   - `id` (Widget API payloads)
+ *   - `name` (fallback)
  */
 function extractComponents(raw: any): string[] {
   const affected = raw?.affected_components;
   if (!Array.isArray(affected)) return [];
 
   return affected.map((c: any) => {
-    // Prefer component `id`, fall back to `name`
     if (typeof c === "string") return c;
-    return c?.id ?? c?.name ?? String(c);
+    return c?.component_id ?? c?.id ?? c?.name ?? String(c);
   });
 }
 
@@ -160,10 +163,13 @@ function normalizeMaintenance(raw: any): MaintenanceWindow {
  * - Incidents are sourced from `ongoing_incidents` (primary) or `incidents` (fallback).
  * - Maintenance windows merge `in_progress_maintenances` and `scheduled_maintenances`,
  *   falling back to `maintenance_windows`. Duplicates (by `id`) are removed.
+ *
+ * Note: Component statuses are handled separately by `mapComponentStatuses()` in the
+ * cron route, which provides better fuzzy name matching against our internal IDs.
  */
 export function normalizeWidgetResponse(raw: any): NormalizedWidgetData {
   if (!raw || typeof raw !== "object") {
-    return { incidents: [], maintenance_windows: [], component_statuses: new Map() };
+    return { incidents: [], maintenance_windows: [] };
   }
 
   // --- Incidents -----------------------------------------------------------
@@ -203,18 +209,7 @@ export function normalizeWidgetResponse(raw: any): NormalizedWidgetData {
 
   const maintenance_windows: MaintenanceWindow[] = uniqueMaintenances.map(normalizeMaintenance);
 
-  // --- Component statuses --------------------------------------------------
-  const component_statuses = new Map<string, string>();
-  if (Array.isArray(raw.components)) {
-    for (const comp of raw.components) {
-      const id = comp?.id ?? comp?.name ?? "";
-      if (id) {
-        component_statuses.set(id, normalizeStatus(comp?.status));
-      }
-    }
-  }
-
-  return { incidents, maintenance_windows, component_statuses };
+  return { incidents, maintenance_windows };
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +222,8 @@ export function normalizeWidgetResponse(raw: any): NormalizedWidgetData {
  *
  * Matching is performed case-insensitively: if a widget component's `name`
  * matches one of the names derived from `defaultGroupIds` (treating the ID as
- * a kebab-case name), we include it.
+ * a kebab-case name), we include it. Only exact matches are used (no loose
+ * substring matching) to avoid incorrect mappings.
  *
  * @param widgetComponents - The `components` array from the Widget API response.
  * @param defaultGroupIds  - Our internal component IDs (e.g. from defaults.ts).
@@ -260,19 +256,8 @@ export function mapComponentStatuses(
     const widgetName = (comp.name ?? comp.id ?? "").toLowerCase().trim();
     if (!widgetName) continue;
 
-    // Try direct match first, then check if any of our IDs is a substring
-    // match (or vice-versa) for flexibility.
-    let matchedId: string | undefined = idLookup.get(widgetName);
-
-    if (!matchedId) {
-      // Attempt a looser match: iterate our known names and check inclusion.
-      for (const [knownName, knownId] of idLookup.entries()) {
-        if (widgetName.includes(knownName) || knownName.includes(widgetName)) {
-          matchedId = knownId;
-          break;
-        }
-      }
-    }
+    // Direct match only — no loose substring matching.
+    const matchedId = idLookup.get(widgetName);
 
     if (matchedId) {
       result.set(matchedId, normalizeStatus(comp.status));

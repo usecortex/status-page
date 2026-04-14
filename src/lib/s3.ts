@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { StatusSnapshot } from "@/types/status";
+import type { StatusSnapshot } from "@/types/status";
 
 const STATUS_FILE_KEY = "status.json";
 
@@ -14,7 +14,7 @@ function getS3Client(): S3Client {
 }
 
 function getBucketName(): string {
-  return process.env.S3_BUCKET_NAME || "hydradb-status-data";
+  return process.env.S3_BUCKET_NAME || "hydradb-status-page-data";
 }
 
 /**
@@ -22,6 +22,10 @@ function getBucketName(): string {
  * Used by the frontend (ISR) to fetch status data without AWS credentials.
  */
 export function getStatusDataUrl(): string {
+  // Allow override for local development / testing
+  if (process.env.STATUS_DATA_URL) {
+    return process.env.STATUS_DATA_URL;
+  }
   const bucket = getBucketName();
   const region = process.env.S3_REGION || "us-east-1";
   return `https://${bucket}.s3.${region}.amazonaws.com/${STATUS_FILE_KEY}`;
