@@ -14,7 +14,7 @@ function getS3Client(): S3Client {
 }
 
 function getBucketName(): string {
-  return process.env.S3_BUCKET_NAME || "hydradb-status-data";
+  return process.env.S3_BUCKET_NAME || "hydradb-status-page-data";
 }
 
 /**
