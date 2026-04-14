@@ -234,9 +234,10 @@ export function mergeHistoricalData(
  *
  * Priority (highest → lowest):
  *  1. Any incident with status "investigating" or "identified" → "outage"
- *  2. Any component with status "degraded" or "degraded_performance" → "degraded"
- *  3. Any component with status "maintenance" or "under_maintenance" → "maintenance"
- *  4. Otherwise → "operational"
+ *  2. Any component with status "outage" → "outage"
+ *  3. Any component with status "degraded" or "degraded_performance" → "degraded"
+ *  4. Any component with status "maintenance" or "under_maintenance" → "maintenance"
+ *  5. Otherwise → "operational"
  *
  * @param groups    - Component groups, each containing an array of components
  *                    with a `status` field.
@@ -261,7 +262,13 @@ export function deriveOverallStatus(
     }
   }
 
-  // 2. Check for degraded components.
+  // 2a. Check for components explicitly marked as outage (e.g. set by cron incident override
+  //     or mapped from incident.io full_outage/partial_outage when no active incident exists).
+  if (componentStatuses.some((s) => s === "outage")) {
+    return "outage";
+  }
+
+  // 2b. Check for degraded components.
   if (
     componentStatuses.some(
       (s) => s === "degraded" || s === "degraded_performance",

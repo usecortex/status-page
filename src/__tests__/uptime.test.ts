@@ -253,6 +253,19 @@ describe("deriveOverallStatus", () => {
     const incidents = [{ status: "investigating" }];
     expect(deriveOverallStatus(groups, incidents)).toBe("outage");
   });
+
+  it("returns outage when a component has status outage and there are no active incidents", () => {
+    // Regression test: component status 'outage' (mapped from full_outage/partial_outage
+    // by the cron's mapComponentStatuses) must bubble up to the overall banner even
+    // when the widget returns no ongoing_incidents for that component.
+    const groups = [{ components: [{ status: "outage" }, { status: "operational" }] }];
+    expect(deriveOverallStatus(groups, [])).toBe("outage");
+  });
+
+  it("component outage takes priority over component degraded", () => {
+    const groups = [{ components: [{ status: "degraded" }, { status: "outage" }] }];
+    expect(deriveOverallStatus(groups, [])).toBe("outage");
+  });
 });
 
 describe("deriveDayStatus", () => {
