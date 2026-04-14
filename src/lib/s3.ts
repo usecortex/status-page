@@ -22,6 +22,10 @@ function getBucketName(): string {
  * Used by the frontend (ISR) to fetch status data without AWS credentials.
  */
 export function getStatusDataUrl(): string {
+  // Allow override for local development / testing
+  if (process.env.STATUS_DATA_URL) {
+    return process.env.STATUS_DATA_URL;
+  }
   const bucket = getBucketName();
   const region = process.env.S3_REGION || "us-east-1";
   return `https://${bucket}.s3.${region}.amazonaws.com/${STATUS_FILE_KEY}`;
