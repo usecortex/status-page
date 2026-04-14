@@ -5,7 +5,14 @@ import { getFailureThreshold, getTimeout } from "@/lib/health-config";
 // Mock fetch globally
 const originalFetch = global.fetch;
 
+beforeEach(() => {
+  // Use fake timers so that the AbortController setTimeout in checkEndpoint
+  // is always cleared and doesn't leak open handles between tests.
+  jest.useFakeTimers();
+});
+
 afterEach(() => {
+  jest.useRealTimers();
   global.fetch = originalFetch;
   delete process.env.HEALTH_CHECK_ENDPOINTS;
 });
