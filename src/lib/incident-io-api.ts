@@ -127,8 +127,28 @@ export async function createIncident(
 }
 
 /**
- * Resolve an incident by setting its status to a post-incident status.
- * Uses the v1 PATCH endpoint.
+ * Fetch available incident statuses from incident.io.
+ * Returns null on failure.
+ */
+async function getIncidentStatuses(): Promise<Array<{ id: string; name: string; category: string }> | null> {
+  const apiKey = getApiKey();
+  if (!apiKey) return null;
+
+  try {
+    const res = await fetch(`${API_BASE}/v1/incident_statuses`, {
+      headers: headers(apiKey),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.incident_statuses ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve an incident by setting its status to "Closed" via the v2 edit endpoint.
+ * Looks up the Closed status ID dynamically.
  */
 export async function resolveIncident(incidentId: string): Promise<boolean> {
   const apiKey = getApiKey();
@@ -138,13 +158,27 @@ export async function resolveIncident(incidentId: string): Promise<boolean> {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/v1/incidents/${incidentId}`, {
-      method: "PATCH",
-      headers: headers(apiKey),
-      body: JSON.stringify({
-        status: "Resolved",
-      }),
-    });
+    // Find the "Closed" status ID
+    const statuses = await getIncidentStatuses();
+    const closedStatus = statuses?.find((s) => s.category === "closed");
+    if (!closedStatus) {
+      console.error("[incident-io-api] Could not find a 'closed' category status");
+      return false;
+    }
+
+    const res = await fetch(
+      `${API_BASE}/v2/incidents/${incidentId}/actions/edit`,
+      {
+        method: "POST",
+        headers: headers(apiKey),
+        body: JSON.stringify({
+          incident: {
+            incident_status_id: closedStatus.id,
+          },
+          notify_incident_channel: true,
+        }),
+      },
+    );
 
     if (!res.ok) {
       const body = await res.text();
