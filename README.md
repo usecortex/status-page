@@ -90,7 +90,7 @@ cp .env.example .env.local
 |----------|----------|-------------|
 | `AWS_ACCESS_KEY_ID` | Yes | AWS credentials with S3 read/write access |
 | `AWS_SECRET_ACCESS_KEY` | Yes | AWS secret key |
-| `AWS_REGION` | Yes | S3 bucket region (e.g., `us-east-1`) |
+| `S3_REGION` | Yes | S3 bucket region (e.g., `us-east-1`) |
 | `S3_BUCKET_NAME` | Yes | S3 bucket name |
 | `CRON_SECRET` | Yes | Secret for authenticating Vercel cron requests |
 | `INCIDENT_IO_WIDGET_URL` | No | incident.io Widget API URL (omit to use defaults) |
