@@ -93,9 +93,10 @@ export function computeDailyUptime(
   const dayEnd = new Date(`${date}T23:59:59Z`).getTime();
 
   // Filter incidents relevant to this component.
+  // Unscoped incidents (no components array) only affect the overall status
+  // banner, not individual component uptime calculations.
   const relevant = incidents.filter((inc) => {
-    // If components list is empty or undefined, the incident affects all.
-    if (!inc.components || inc.components.length === 0) return true;
+    if (!inc.components || inc.components.length === 0) return false;
     return inc.components.includes(componentId);
   });
 
