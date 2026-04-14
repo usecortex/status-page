@@ -80,8 +80,8 @@ export async function findSeverityId(name: string): Promise<string | null> {
   );
   if (match) return match.id;
 
-  // Fall back to highest rank number (least severe)
-  const sorted = [...severities].sort((a, b) => b.rank - a.rank);
+  // Fall back to lowest rank (least severe — rank 0 = Minor)
+  const sorted = [...severities].sort((a, b) => a.rank - b.rank);
   return sorted[0]?.id ?? null;
 }
 

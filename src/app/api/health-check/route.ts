@@ -108,7 +108,7 @@ export async function GET(request: Request): Promise<NextResponse> {
               name: `${result.name} is experiencing issues`,
               summary: buildIncidentSummary(result),
               severityId: sevId,
-              idempotencyKey: `health-check-${result.componentId}-${today()}`,
+              idempotencyKey: `health-check-${result.componentId}-${nowHour()}`,
             });
 
             if (incident) {
@@ -165,8 +165,12 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 }
 
-function today(): string {
-  return new Date().toISOString().split("T")[0];
+/** Hour-granularity timestamp for idempotency keys (e.g. "2025-01-15T14").
+ *  Prevents dedup if the same component fails, recovers, and fails again
+ *  in a different hour on the same day. */
+function nowHour(): string {
+  const iso = new Date().toISOString();
+  return iso.slice(0, 13); // "2025-01-15T14"
 }
 
 function buildIncidentSummary(result: HealthCheckResult): string {
