@@ -1,5 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { StatusSnapshot } from "@/types/status";
+import type { StatusSnapshot } from "@/types/status";
 
 const STATUS_FILE_KEY = "status.json";
 

@@ -1,5 +1,5 @@
 import { getStatusDataUrl } from "@/lib/s3";
-import { StatusSnapshot } from "@/types/status";
+import type { StatusSnapshot } from "@/types/status";
 import StatusPage from "@/components/StatusPage";
 
 // Revalidate every 60 seconds
@@ -10,7 +10,7 @@ export default async function Page() {
 
   try {
     const url = getStatusDataUrl();
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url);
     if (res.ok) {
       data = await res.json();
     }
