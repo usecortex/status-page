@@ -18,6 +18,11 @@ jest.mock("@/lib/incident-io", () => ({
   fetchWidgetData: jest.fn(),
   normalizeWidgetResponse: jest.fn(),
   mapComponentStatuses: jest.fn(),
+  // normalizeName is used in the reverseComponentMap build (cron route step 4).
+  // Return a simple passthrough so the mock doesn't silently swallow calls.
+  normalizeName: jest.fn((name: string) =>
+    name.toLowerCase().replace(/[&/]/g, " ").replace(/\s+/g, " ").trim(),
+  ),
 }));
 
 import { GET } from "@/app/api/cron/route";
@@ -26,6 +31,7 @@ import {
   fetchWidgetData,
   normalizeWidgetResponse,
   mapComponentStatuses,
+  normalizeName,
 } from "@/lib/incident-io";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +43,7 @@ const mockWriteStatusData = writeStatusData as jest.MockedFunction<typeof writeS
 const mockFetchWidgetData = fetchWidgetData as jest.MockedFunction<typeof fetchWidgetData>;
 const mockNormalizeWidgetResponse = normalizeWidgetResponse as jest.MockedFunction<typeof normalizeWidgetResponse>;
 const mockMapComponentStatuses = mapComponentStatuses as jest.MockedFunction<typeof mapComponentStatuses>;
+const mockNormalizeName = normalizeName as jest.MockedFunction<typeof normalizeName>;
 
 function makeRequest(headers: Record<string, string> = {}): Request {
   const h = new Headers(headers);
@@ -200,5 +207,187 @@ describe("GET /api/cron", () => {
 
     const body = await res.json();
     expect(body.error).toBe("S3 connection failed");
+  });
+
+  // -----------------------------------------------------------------------
+  // Migration: DEFAULT_COMPONENT_GROUPS as structural source of truth
+  // -----------------------------------------------------------------------
+
+  it("uses DEFAULT_COMPONENT_GROUPS structure even when existing data has different components", async () => {
+    process.env.INCIDENT_IO_WIDGET_URL = "https://example.com/widget";
+
+    // Existing snapshot has old-style component layout (from before the restructure)
+    mockReadStatusData.mockResolvedValue({
+      generated_at: "2026-04-14T00:00:00Z",
+      configured: true,
+      overall_status: "operational",
+      component_groups: [
+        {
+          id: "old-group",
+          name: "Old Group",
+          components: [
+            {
+              id: "hybrid-search", // old component, no longer in DEFAULT_COMPONENTS
+              name: "Hybrid Search",
+              status: "operational",
+              daily_history: [{ date: "2026-04-13", uptime_pct: 99.5, status: "degraded" }],
+              uptime: { "30d": 99.5, "60d": 99.7, "90d": 99.8 },
+            },
+          ],
+        },
+      ],
+      incidents: [],
+      maintenance_windows: [],
+    });
+    mockFetchWidgetData.mockResolvedValue({ components: [] });
+    mockNormalizeWidgetResponse.mockReturnValue({ incidents: [], maintenance_windows: [] });
+    mockMapComponentStatuses.mockReturnValue(new Map());
+    mockWriteStatusData.mockResolvedValue(undefined);
+
+    const res = await GET(makeRequest({ authorization: "Bearer test-secret" }));
+    expect(res.status).toBe(200);
+
+    const snapshot = mockWriteStatusData.mock.calls[0][0];
+
+    // Must use DEFAULT_COMPONENT_GROUPS structure, not the old "old-group"
+    const groupIds = snapshot.component_groups.map((g: { id: string }) => g.id);
+    expect(groupIds).not.toContain("old-group");
+    // New groups from DEFAULT_COMPONENT_GROUPS must be present
+    expect(groupIds).toContain("tenants");
+    expect(groupIds).toContain("memories");
+    expect(groupIds).toContain("recall");
+
+    // Old component "hybrid-search" should not appear in any group
+    const allComponents = snapshot.component_groups.flatMap(
+      (g: { components: { id: string }[] }) => g.components,
+    );
+    const allIds = allComponents.map((c: { id: string }) => c.id);
+    expect(allIds).not.toContain("hybrid-search");
+  });
+
+  it("preserves historical uptime data for components that carry over across the migration", async () => {
+    process.env.INCIDENT_IO_WIDGET_URL = "https://example.com/widget";
+
+    // Existing snapshot already has the new-style "dashboard" component with history
+    const existingHistory = [
+      { date: "2026-04-12", uptime_pct: 99.1, status: "degraded" },
+      { date: "2026-04-13", uptime_pct: 100, status: "operational" },
+    ];
+    mockReadStatusData.mockResolvedValue({
+      generated_at: "2026-04-14T00:00:00Z",
+      configured: true,
+      overall_status: "operational",
+      component_groups: [
+        {
+          id: "dashboard",
+          name: "Dashboard",
+          components: [
+            {
+              id: "dashboard",
+              name: "Dashboard",
+              status: "operational",
+              daily_history: existingHistory,
+              uptime: { "30d": 99.5, "60d": 99.7, "90d": 99.8 },
+            },
+          ],
+        },
+      ],
+      incidents: [],
+      maintenance_windows: [],
+    });
+    mockFetchWidgetData.mockResolvedValue({ components: [] });
+    mockNormalizeWidgetResponse.mockReturnValue({ incidents: [], maintenance_windows: [] });
+    mockMapComponentStatuses.mockReturnValue(new Map());
+    mockWriteStatusData.mockResolvedValue(undefined);
+
+    const res = await GET(makeRequest({ authorization: "Bearer test-secret" }));
+    expect(res.status).toBe(200);
+
+    const snapshot = mockWriteStatusData.mock.calls[0][0];
+    const allComponents = snapshot.component_groups.flatMap(
+      (g: { components: any[] }) => g.components,
+    );
+    const dashboardComp = allComponents.find((c: { id: string }) => c.id === "dashboard");
+    expect(dashboardComp).toBeDefined();
+
+    // Historical entries from before today should be preserved in the merged history
+    const history = dashboardComp.daily_history as Array<{ date: string }>;
+    const preservedDates = history.map((h) => h.date);
+    expect(preservedDates).toContain("2026-04-12");
+    expect(preservedDates).toContain("2026-04-13");
+  });
+
+  it("reverseComponentMap remaps short display names via componentNameMap (e.g. 'List' -> 'list-data')", async () => {
+    process.env.INCIDENT_IO_WIDGET_URL = "https://example.com/widget";
+
+    // Restore normalizeName implementation (resetAllMocks clears the factory mock)
+    mockNormalizeName.mockImplementation((name: string) =>
+      name.toLowerCase().replace(/[&/]/g, " ").replace(/\s+/g, " ").trim(),
+    );
+
+    mockReadStatusData.mockResolvedValue(null);
+    // Widget returns a component with display name "List" and a widget-specific UUID
+    const WIDGET_LIST_ID = "widget-uuid-for-list";
+    mockFetchWidgetData.mockResolvedValue({
+      components: [
+        { id: WIDGET_LIST_ID, name: "List", status: { id: "operational" } },
+      ],
+    });
+    // normalizeWidgetResponse returns an incident that references the widget UUID
+    mockNormalizeWidgetResponse.mockReturnValue({
+      incidents: [
+        {
+          id: "inc-1",
+          name: "List is down",
+          status: "investigating",
+          components: [WIDGET_LIST_ID],
+          updates: [],
+          started_at: new Date().toISOString(),
+        },
+      ],
+      maintenance_windows: [],
+    });
+    // mapComponentStatuses must include "list-data" so the reverseComponentMap can index it
+    mockMapComponentStatuses.mockReturnValue(
+      new Map([["list-data", "operational"]]),
+    );
+    mockWriteStatusData.mockResolvedValue(undefined);
+
+    const res = await GET(makeRequest({ authorization: "Bearer test-secret" }));
+    expect(res.status).toBe(200);
+
+    // The written snapshot should have the incident's component remapped from
+    // the widget UUID to our internal ID "list-data"
+    const snapshot = mockWriteStatusData.mock.calls[0][0];
+    const allComponents = snapshot.component_groups.flatMap(
+      (g: { components: any[] }) => g.components,
+    );
+    const listComp = allComponents.find((c: { id: string }) => c.id === "list-data");
+    expect(listComp).toBeDefined();
+    // The incident should have overridden the status to "outage" because
+    // the reverseComponentMap correctly mapped widget-uuid-for-list -> list-data
+    expect(listComp.status).toBe("outage");
+  });
+
+  it("passes componentNameMap to mapComponentStatuses for display-name matching", async () => {
+    process.env.INCIDENT_IO_WIDGET_URL = "https://example.com/widget";
+
+    mockReadStatusData.mockResolvedValue(null);
+    mockFetchWidgetData.mockResolvedValue({ components: [] });
+    mockNormalizeWidgetResponse.mockReturnValue({ incidents: [], maintenance_windows: [] });
+    mockMapComponentStatuses.mockReturnValue(new Map());
+    mockWriteStatusData.mockResolvedValue(undefined);
+
+    await GET(makeRequest({ authorization: "Bearer test-secret" }));
+
+    // mapComponentStatuses must be called with the componentNameMap (3rd arg)
+    const callArgs = mockMapComponentStatuses.mock.calls[0];
+    expect(callArgs).toHaveLength(3);
+    const componentNameMap = callArgs[2] as Map<string, string>;
+    expect(componentNameMap).toBeInstanceOf(Map);
+    // Spot-check a few new component IDs
+    expect(componentNameMap.get("monitor-infra-status")).toBe("Monitor & Infra Status");
+    expect(componentNameMap.get("shared-hive-memory")).toBe("Shared / Hive Memory");
+    expect(componentNameMap.get("dashboard")).toBe("Dashboard");
   });
 });

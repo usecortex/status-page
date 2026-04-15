@@ -171,4 +171,95 @@ describe("mapComponentStatuses", () => {
     // Should NOT match because "hybrid search extended" !== "hybrid search"
     expect(result.has("hybrid-search")).toBe(false);
   });
+
+  // -----------------------------------------------------------------------
+  // componentNames parameter — new in health-checks diff
+  // Tests that display names containing & and / are matched correctly.
+  // -----------------------------------------------------------------------
+
+  it("matches component with & in display name via componentNames map", () => {
+    // Widget API sends "Monitor & Infra Status"; our ID is "monitor-infra-status"
+    const widgetComponents = [
+      { name: "Monitor & Infra Status", status: "operational" },
+    ];
+    const defaultIds = ["monitor-infra-status"];
+    const componentNames = new Map([["monitor-infra-status", "Monitor & Infra Status"]]);
+
+    const result = mapComponentStatuses(widgetComponents, defaultIds, componentNames);
+    expect(result.get("monitor-infra-status")).toBe("operational");
+  });
+
+  it("matches component with / in display name via componentNames map", () => {
+    // Widget API sends "Shared / Hive Memory"; our ID is "shared-hive-memory"
+    const widgetComponents = [
+      { name: "Shared / Hive Memory", status: "degraded_performance" },
+    ];
+    const defaultIds = ["shared-hive-memory"];
+    const componentNames = new Map([["shared-hive-memory", "Shared / Hive Memory"]]);
+
+    const result = mapComponentStatuses(widgetComponents, defaultIds, componentNames);
+    expect(result.get("shared-hive-memory")).toBe("degraded");
+  });
+
+  it("matches component with & even without componentNames (via hyphen-to-space fallback)", () => {
+    // "monitor-infra-status" → hyphen-to-space → "monitor infra status"
+    // "Monitor & Infra Status" → normalizeName → "monitor infra status"
+    // These collide so the match works even without componentNames.
+    const widgetComponents = [
+      { name: "Monitor & Infra Status", status: "partial_outage" },
+    ];
+    const defaultIds = ["monitor-infra-status"];
+
+    const result = mapComponentStatuses(widgetComponents, defaultIds);
+    expect(result.get("monitor-infra-status")).toBe("outage");
+  });
+
+  it("matches short display name that differs from hyphen-to-space form via componentNames", () => {
+    // id="list-data", hyphen-to-space="list data", display name="List"
+    // Widget sends "List" — only matches via componentNames entry (not hyphen-to-space).
+    const widgetComponents = [
+      { name: "List", status: "operational" },
+    ];
+    const defaultIds = ["list-data"];
+    const componentNames = new Map([["list-data", "List"]]);
+
+    const result = mapComponentStatuses(widgetComponents, defaultIds, componentNames);
+    expect(result.get("list-data")).toBe("operational");
+  });
+
+  it("componentNames does NOT cause false positive for similar but different names", () => {
+    // "List Sub-Tenant IDs" should not match "list-data" (whose display name is "List")
+    const widgetComponents = [
+      { name: "List Sub-Tenant IDs", status: "operational" },
+    ];
+    const defaultIds = ["list-data"];
+    const componentNames = new Map([["list-data", "List"]]);
+
+    const result = mapComponentStatuses(widgetComponents, defaultIds, componentNames);
+    // "list sub-tenant ids" !== "list" — no match
+    expect(result.has("list-data")).toBe(false);
+  });
+
+  it("matches multiple components with mixed punctuation via componentNames", () => {
+    // Real-world scenario: multiple new component names from defaults.ts
+    const widgetComponents = [
+      { name: "Monitor & Infra Status", status: "operational" },
+      { name: "Shared / Hive Memory", status: "degraded_performance" },
+      { name: "List", status: "partial_outage" },
+      { name: "Dashboard", status: "operational" },
+    ];
+    const defaultIds = ["monitor-infra-status", "shared-hive-memory", "list-data", "dashboard"];
+    const componentNames = new Map([
+      ["monitor-infra-status", "Monitor & Infra Status"],
+      ["shared-hive-memory", "Shared / Hive Memory"],
+      ["list-data", "List"],
+      ["dashboard", "Dashboard"],
+    ]);
+
+    const result = mapComponentStatuses(widgetComponents, defaultIds, componentNames);
+    expect(result.get("monitor-infra-status")).toBe("operational");
+    expect(result.get("shared-hive-memory")).toBe("degraded");
+    expect(result.get("list-data")).toBe("outage");
+    expect(result.get("dashboard")).toBe("operational");
+  });
 });

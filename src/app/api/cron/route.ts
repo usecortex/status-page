@@ -4,6 +4,7 @@ import {
   fetchWidgetData,
   normalizeWidgetResponse,
   mapComponentStatuses,
+  normalizeName,
 } from "@/lib/incident-io";
 import {
   computeDailyUptime,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/uptime";
 import { DEFAULT_COMPONENT_GROUPS, DEFAULT_COMPONENTS } from "@/lib/defaults";
 import type { StatusSnapshot } from "@/types/status";
+import type { DailyUptime, UptimeMetrics } from "@/types/status";
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
@@ -37,9 +39,13 @@ export async function GET(request: Request): Promise<NextResponse> {
       const raw = await fetchWidgetData(widgetUrl);
       if (raw) {
         const normalized = normalizeWidgetResponse(raw);
+        const componentNameMap = new Map(
+          DEFAULT_COMPONENTS.map((c) => [c.id, c.name] as [string, string]),
+        );
         const componentStatuses = mapComponentStatuses(
           raw.components || [],
           DEFAULT_COMPONENTS.map((c) => c.id),
+          componentNameMap,
         );
 
         // Build reverse lookup: incident.io widget component ID -> our internal ID.
@@ -47,15 +53,34 @@ export async function GET(request: Request): Promise<NextResponse> {
         // that computeDailyUptime can correctly match incidents to components.
         const reverseComponentMap = new Map<string, string>();
         if (Array.isArray(raw.components)) {
+          // Build lookup from internal IDs: both raw and normalized forms
+          const internalLookup = new Map<string, string>();
+          for (const [internalId] of componentStatuses.entries()) {
+            internalLookup.set(internalId.toLowerCase(), internalId);
+            // Also index the space-separated form for normalizeName matching
+            internalLookup.set(internalId.replace(/-/g, " ").toLowerCase(), internalId);
+            // Also index the display name for components where name != hyphen-to-space
+            // form of ID (e.g. "list-data" has display name "List")
+            const displayName = componentNameMap.get(internalId);
+            if (displayName) {
+              internalLookup.set(normalizeName(displayName), internalId);
+            }
+          }
+
           for (const comp of raw.components) {
             const widgetId = comp?.id ?? "";
-            const widgetName = (comp?.name ?? "").toLowerCase().replace(/\s+/g, "-");
-            for (const [internalId] of componentStatuses.entries()) {
-              const internalName = internalId.toLowerCase();
-              if (widgetName === internalName || widgetId.toLowerCase() === internalName) {
-                reverseComponentMap.set(widgetId, internalId);
-                break;
-              }
+            // Normalize: strip & / punctuation, collapse whitespace, then
+            // try both space-separated and hyphenated forms
+            const normalizedCompName = normalizeName(comp?.name ?? "");
+            const hyphenated = normalizedCompName.replace(/\s+/g, "-");
+
+            const match =
+              internalLookup.get(normalizedCompName) ??
+              internalLookup.get(hyphenated) ??
+              internalLookup.get(widgetId.toLowerCase());
+
+            if (match) {
+              reverseComponentMap.set(widgetId, match);
             }
           }
         }
@@ -88,8 +113,29 @@ export async function GET(request: Request): Promise<NextResponse> {
 
         // 5. Build updated component groups
         const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-        const baseGroups =
-          existing?.component_groups || DEFAULT_COMPONENT_GROUPS;
+
+        // Migration: always use DEFAULT_COMPONENT_GROUPS as the structural
+        // source of truth (which components exist and how they're grouped).
+        // Preserve historical uptime data for components that carry over from
+        // a previous snapshot by building a lookup from the existing data.
+        const existingComponentMap = new Map<
+          string,
+          { daily_history: DailyUptime[]; uptime: UptimeMetrics; status: string }
+        >();
+        if (existing?.component_groups) {
+          for (const group of existing.component_groups) {
+            for (const comp of group.components) {
+              existingComponentMap.set(comp.id, comp);
+            }
+          }
+        }
+        const baseGroups = DEFAULT_COMPONENT_GROUPS.map((group) => ({
+          ...group,
+          components: group.components.map((comp) => {
+            const prev = existingComponentMap.get(comp.id);
+            return prev ? { ...comp, daily_history: prev.daily_history, uptime: prev.uptime, status: prev.status } : comp;
+          }),
+        }));
 
         const updatedGroups = baseGroups.map((group) => ({
           ...group,
