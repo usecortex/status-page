@@ -58,7 +58,12 @@ export async function GET(request: Request): Promise<NextResponse> {
       return severityId;
     };
 
-    // 5. Process each result
+    // 5. Process each result.
+    //
+    // Multiple components can share the same URL (e.g. 20 API components all
+    // point to api.hydradb.com/health).  When a shared URL goes down we create
+    // ONE incident for the URL and assign that incident ID to every component
+    // that maps to it.  This prevents an incident flood in incident.io.
     const newState: HealthState = {
       components: { ...existingState?.components },
       updatedAt: now,
@@ -66,6 +71,14 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     const incidentsCreated: string[] = [];
     const incidentsResolved: string[] = [];
+
+    // Track incidents already created/resolved per URL in this cycle so we
+    // don't duplicate API calls for components sharing the same endpoint.
+    const urlIncidentCache = new Map<
+      string,
+      { id: string; createdAt: string } | null
+    >();
+    const urlResolveCache = new Map<string, boolean>();
 
     for (const result of results) {
       const endpoint = endpoints.find(
@@ -79,8 +92,16 @@ export async function GET(request: Request): Promise<NextResponse> {
         // Component is healthy
         let incidentCleared = true;
         if (prevState.activeIncidentId && hasApiKey) {
-          // Resolve the open incident
-          const resolved = await resolveIncident(prevState.activeIncidentId);
+          // Check if we already tried to resolve this incident (shared URL)
+          const cacheKey = prevState.activeIncidentId;
+          let resolved: boolean;
+          if (urlResolveCache.has(cacheKey)) {
+            resolved = urlResolveCache.get(cacheKey)!;
+          } else {
+            resolved = await resolveIncident(prevState.activeIncidentId);
+            urlResolveCache.set(cacheKey, resolved);
+          }
+
           if (resolved) {
             incidentsResolved.push(result.componentId);
             console.log(
@@ -111,30 +132,55 @@ export async function GET(request: Request): Promise<NextResponse> {
           !prevState.activeIncidentId &&
           hasApiKey
         ) {
-          // Threshold reached, create incident
-          const sevId = await getSeverity();
-          if (sevId) {
-            const incident = await createIncident({
-              name: `${result.name} is experiencing issues`,
-              summary: buildIncidentSummary(result, endpoint),
-              severityId: sevId,
-              idempotencyKey: `health-check-${result.componentId}-${nowHour()}`,
-            });
+          // Threshold reached — create one incident per URL, shared across
+          // all components that map to the same endpoint.
+          const urlKey = `${endpoint.method ?? "GET"}|${endpoint.url}`;
 
-            if (incident) {
-              incidentsCreated.push(result.componentId);
-              console.log(
-                `[health-check] Created incident ${incident.id} for ${result.name}`,
+          if (!urlIncidentCache.has(urlKey)) {
+            // First component hitting threshold for this URL — create incident
+            const sevId = await getSeverity();
+            if (sevId) {
+              const affectedNames = results
+                .filter((r) => r.url === endpoint.url && !r.healthy)
+                .map((r) => r.name);
+              const incidentName =
+                affectedNames.length > 1
+                  ? `${endpoint.url} is experiencing issues (${affectedNames.length} components affected)`
+                  : `${result.name} is experiencing issues`;
+
+              const incident = await createIncident({
+                name: incidentName,
+                summary: buildIncidentSummary(result, endpoint, affectedNames),
+                severityId: sevId,
+                idempotencyKey: `health-check-${urlKey}-${nowHour()}`,
+              });
+
+              urlIncidentCache.set(
+                urlKey,
+                incident ? { id: incident.id, createdAt: now } : null,
               );
-              newState.components[result.componentId] = {
-                consecutiveFailures: failures,
-                activeIncidentId: incident.id,
-                incidentCreatedAt: now,
-                lastCheckedAt: now,
-                lastHealthy: false,
-              };
-              continue;
+
+              if (incident) {
+                console.log(
+                  `[health-check] Created incident ${incident.id} for ${endpoint.url} (${affectedNames.length} components)`,
+                );
+              }
+            } else {
+              urlIncidentCache.set(urlKey, null);
             }
+          }
+
+          const cached = urlIncidentCache.get(urlKey);
+          if (cached) {
+            incidentsCreated.push(result.componentId);
+            newState.components[result.componentId] = {
+              consecutiveFailures: failures,
+              activeIncidentId: cached.id,
+              incidentCreatedAt: cached.createdAt,
+              lastCheckedAt: now,
+              lastHealthy: false,
+            };
+            continue;
           }
         }
 
@@ -186,12 +232,18 @@ function nowHour(): string {
 function buildIncidentSummary(
   result: HealthCheckResult,
   endpoint: HealthEndpoint,
+  affectedNames?: string[],
 ): string {
+  const affected =
+    affectedNames && affectedNames.length > 1
+      ? `Affected components: ${affectedNames.join(", ")}. `
+      : "";
+
   if (result.statusCode) {
     const expected = endpoint.expectedStatus
       ? `expected ${endpoint.expectedStatus.join("/")}`
       : "expected 2xx";
-    return `Automated health check detected ${result.name} returning HTTP ${result.statusCode} (${expected}). Endpoint: ${result.url}`;
+    return `Automated health check detected ${result.name} returning HTTP ${result.statusCode} (${expected}). ${affected}Endpoint: ${result.url}`;
   }
-  return `Automated health check detected ${result.name} is unreachable: ${result.error}. Endpoint: ${result.url}`;
+  return `Automated health check detected ${result.name} is unreachable: ${result.error}. ${affected}Endpoint: ${result.url}`;
 }

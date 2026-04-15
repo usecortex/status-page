@@ -473,6 +473,137 @@ describe("GET /api/health-check", () => {
     expect(writtenState.components["full-recall"].activeIncidentId).toBe("inc-already-open");
   });
 
+  // ---- Multi-component URL grouping ----
+
+  it("creates only one incident when multiple components share a URL", async () => {
+    const sharedUrl = "https://api.hydradb.com/health";
+    const endpoints = [
+      { componentId: "create-tenant", name: "Create Tenant", url: sharedUrl },
+      { componentId: "user-memory", name: "User Memory", url: sharedUrl },
+      { componentId: "full-recall", name: "Full Recall", url: sharedUrl },
+    ];
+    mockGetEndpoints.mockReturnValue(endpoints);
+    mockGetThreshold.mockReturnValue(2);
+
+    // All 3 components have 1 previous failure — this check is the 2nd (meets threshold)
+    mockGetComponentState.mockReturnValue({
+      ...defaultComponentState,
+      consecutiveFailures: 1,
+    });
+
+    mockRunChecks.mockResolvedValue(
+      endpoints.map((ep) => ({
+        componentId: ep.componentId,
+        name: ep.name,
+        url: ep.url,
+        healthy: false,
+        statusCode: 503,
+        latencyMs: 100,
+        error: "HTTP 503",
+      })),
+    );
+    mockFindSeverity.mockResolvedValue("sev-minor-id");
+    mockCreateIncident.mockResolvedValue({
+      id: "inc-shared",
+      name: "api.hydradb.com/health is experiencing issues",
+      status: "triage",
+      reference: "INC-99",
+    });
+
+    const res = await GET(makeRequest({ authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    // Only ONE createIncident call for the shared URL
+    expect(mockCreateIncident).toHaveBeenCalledTimes(1);
+    // All 3 components should be in incidents_created
+    expect(body.incidents_created).toEqual(["create-tenant", "user-memory", "full-recall"]);
+
+    // All 3 components should share the same incident ID
+    const writtenState = mockWriteState.mock.calls[0][0];
+    expect(writtenState.components["create-tenant"].activeIncidentId).toBe("inc-shared");
+    expect(writtenState.components["user-memory"].activeIncidentId).toBe("inc-shared");
+    expect(writtenState.components["full-recall"].activeIncidentId).toBe("inc-shared");
+  });
+
+  it("resolves shared incident only once when multiple components recover", async () => {
+    const sharedUrl = "https://api.hydradb.com/health";
+    const endpoints = [
+      { componentId: "create-tenant", name: "Create Tenant", url: sharedUrl },
+      { componentId: "user-memory", name: "User Memory", url: sharedUrl },
+    ];
+    mockGetEndpoints.mockReturnValue(endpoints);
+
+    // Both components share the same incident ID
+    mockGetComponentState.mockReturnValue({
+      consecutiveFailures: 3,
+      activeIncidentId: "inc-shared",
+      incidentCreatedAt: "2025-01-01T00:00:00Z",
+      lastCheckedAt: "2025-01-01T00:00:00Z",
+      lastHealthy: false,
+    });
+
+    mockRunChecks.mockResolvedValue(
+      endpoints.map((ep) => ({
+        componentId: ep.componentId,
+        name: ep.name,
+        url: ep.url,
+        healthy: true,
+        statusCode: 200,
+        latencyMs: 50,
+      })),
+    );
+    mockResolveIncident.mockResolvedValue(true);
+
+    const res = await GET(makeRequest({ authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    // resolveIncident should be called only ONCE (same incident ID)
+    expect(mockResolveIncident).toHaveBeenCalledTimes(1);
+    expect(mockResolveIncident).toHaveBeenCalledWith("inc-shared");
+    // Both components should be in resolved list
+    expect(body.incidents_resolved).toEqual(["create-tenant", "user-memory"]);
+  });
+
+  it("handles mixed URLs: shared URL down, independent URL up", async () => {
+    const endpoints = [
+      { componentId: "create-tenant", name: "Create Tenant", url: "https://api.hydradb.com/health" },
+      { componentId: "user-memory", name: "User Memory", url: "https://api.hydradb.com/health" },
+      { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
+    ];
+    mockGetEndpoints.mockReturnValue(endpoints);
+    mockGetThreshold.mockReturnValue(2);
+    mockGetComponentState.mockReturnValue({
+      ...defaultComponentState,
+      consecutiveFailures: 1,
+    });
+
+    mockRunChecks.mockResolvedValue([
+      { componentId: "create-tenant", name: "Create Tenant", url: "https://api.hydradb.com/health", healthy: false, statusCode: 503, latencyMs: 100, error: "HTTP 503" },
+      { componentId: "user-memory", name: "User Memory", url: "https://api.hydradb.com/health", healthy: false, statusCode: 503, latencyMs: 100, error: "HTTP 503" },
+      { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com", healthy: true, statusCode: 200, latencyMs: 50 },
+    ]);
+    mockFindSeverity.mockResolvedValue("sev-minor-id");
+    mockCreateIncident.mockResolvedValue({
+      id: "inc-api",
+      name: "api.hydradb.com/health is experiencing issues",
+      status: "triage",
+      reference: "INC-100",
+    });
+
+    const res = await GET(makeRequest({ authorization: "Bearer test-secret" }));
+    const body = await res.json();
+
+    // Only 1 incident for the shared API URL
+    expect(mockCreateIncident).toHaveBeenCalledTimes(1);
+    expect(body.incidents_created).toEqual(["create-tenant", "user-memory"]);
+    expect(body.healthy).toBe(1);
+    expect(body.unhealthy).toBe(2);
+
+    const writtenState = mockWriteState.mock.calls[0][0];
+    expect(writtenState.components.dashboard.lastHealthy).toBe(true);
+    expect(writtenState.components.dashboard.activeIncidentId).toBeNull();
+  });
+
   // ---- Error handling ----
 
   it("returns 500 on unhandled error", async () => {

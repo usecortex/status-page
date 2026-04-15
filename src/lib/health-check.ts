@@ -102,12 +102,11 @@ export async function runHealthChecks(
   const uniqueEndpoints = [...urlMap.values()].map((group) => group[0]);
   const uniqueResults = await Promise.all(uniqueEndpoints.map(checkEndpoint));
 
-  // Build a lookup from the unique results.
+  // Build a lookup from the unique results (index-aligned with uniqueEndpoints).
   const resultByKey = new Map<string, HealthCheckResult>();
-  for (const r of uniqueResults) {
-    const ep = endpoints.find((e) => e.componentId === r.componentId)!;
-    const key = `${ep.method ?? "GET"}|${ep.url}`;
-    resultByKey.set(key, r);
+  for (let i = 0; i < uniqueEndpoints.length; i++) {
+    const key = `${uniqueEndpoints[i].method ?? "GET"}|${uniqueEndpoints[i].url}`;
+    resultByKey.set(key, uniqueResults[i]);
   }
 
   // Fan out: produce one HealthCheckResult per original endpoint.
