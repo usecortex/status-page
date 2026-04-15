@@ -31,6 +31,7 @@ import {
   fetchWidgetData,
   normalizeWidgetResponse,
   mapComponentStatuses,
+  normalizeName,
 } from "@/lib/incident-io";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +43,7 @@ const mockWriteStatusData = writeStatusData as jest.MockedFunction<typeof writeS
 const mockFetchWidgetData = fetchWidgetData as jest.MockedFunction<typeof fetchWidgetData>;
 const mockNormalizeWidgetResponse = normalizeWidgetResponse as jest.MockedFunction<typeof normalizeWidgetResponse>;
 const mockMapComponentStatuses = mapComponentStatuses as jest.MockedFunction<typeof mapComponentStatuses>;
+const mockNormalizeName = normalizeName as jest.MockedFunction<typeof normalizeName>;
 
 function makeRequest(headers: Record<string, string> = {}): Request {
   const h = new Headers(headers);
@@ -313,6 +315,58 @@ describe("GET /api/cron", () => {
     const preservedDates = history.map((h) => h.date);
     expect(preservedDates).toContain("2026-04-12");
     expect(preservedDates).toContain("2026-04-13");
+  });
+
+  it("reverseComponentMap remaps short display names via componentNameMap (e.g. 'List' -> 'list-data')", async () => {
+    process.env.INCIDENT_IO_WIDGET_URL = "https://example.com/widget";
+
+    // Restore normalizeName implementation (resetAllMocks clears the factory mock)
+    mockNormalizeName.mockImplementation((name: string) =>
+      name.toLowerCase().replace(/[&/]/g, " ").replace(/\s+/g, " ").trim(),
+    );
+
+    mockReadStatusData.mockResolvedValue(null);
+    // Widget returns a component with display name "List" and a widget-specific UUID
+    const WIDGET_LIST_ID = "widget-uuid-for-list";
+    mockFetchWidgetData.mockResolvedValue({
+      components: [
+        { id: WIDGET_LIST_ID, name: "List", status: { id: "operational" } },
+      ],
+    });
+    // normalizeWidgetResponse returns an incident that references the widget UUID
+    mockNormalizeWidgetResponse.mockReturnValue({
+      incidents: [
+        {
+          id: "inc-1",
+          name: "List is down",
+          status: "investigating",
+          components: [WIDGET_LIST_ID],
+          updates: [],
+          started_at: new Date().toISOString(),
+        },
+      ],
+      maintenance_windows: [],
+    });
+    // mapComponentStatuses must include "list-data" so the reverseComponentMap can index it
+    mockMapComponentStatuses.mockReturnValue(
+      new Map([["list-data", "operational"]]),
+    );
+    mockWriteStatusData.mockResolvedValue(undefined);
+
+    const res = await GET(makeRequest({ authorization: "Bearer test-secret" }));
+    expect(res.status).toBe(200);
+
+    // The written snapshot should have the incident's component remapped from
+    // the widget UUID to our internal ID "list-data"
+    const snapshot = mockWriteStatusData.mock.calls[0][0];
+    const allComponents = snapshot.component_groups.flatMap(
+      (g: { components: any[] }) => g.components,
+    );
+    const listComp = allComponents.find((c: { id: string }) => c.id === "list-data");
+    expect(listComp).toBeDefined();
+    // The incident should have overridden the status to "outage" because
+    // the reverseComponentMap correctly mapped widget-uuid-for-list -> list-data
+    expect(listComp.status).toBe("outage");
   });
 
   it("passes componentNameMap to mapComponentStatuses for display-name matching", async () => {
