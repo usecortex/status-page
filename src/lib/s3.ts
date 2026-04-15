@@ -39,17 +39,6 @@ export function resetS3Client(): void {
   _s3Client = null;
 }
 
-/**
- * Resets the cached S3Client singleton so the next call to `getS3Client()`
- * creates a fresh instance. Useful in tests and when environment variables
- * change between invocations.
- *
- * @visibleForTesting
- */
-export function resetS3Client(): void {
-  _s3Client = null;
-}
-
 export function getBucketName(): string {
   return process.env.S3_BUCKET_NAME || "hydradb-status-page-data";
 }
