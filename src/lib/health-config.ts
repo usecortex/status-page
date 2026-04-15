@@ -11,6 +11,8 @@
  *   HEALTH_CHECK_ENDPOINTS='[{"componentId":"dashboard","name":"Dashboard","url":"https://app.hydradb.com"}]'
  */
 
+import { DEFAULT_COMPONENTS } from "./defaults";
+
 export interface HealthEndpoint {
   /** Component ID from defaults.ts */
   componentId: string;
@@ -53,7 +55,7 @@ export function getHealthEndpoints(): HealthEndpoint[] {
       const parsed = JSON.parse(envEndpoints);
       if (Array.isArray(parsed)) return parsed;
       // Support simple { componentId: url } format
-      if (typeof parsed === "object") {
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return Object.entries(parsed).map(([componentId, url]) => ({
           componentId,
           name: componentId
@@ -68,10 +70,10 @@ export function getHealthEndpoints(): HealthEndpoint[] {
     }
   }
 
-  // Default health check endpoints.
+  // Default health check endpoints — derived from DEFAULT_COMPONENTS.
   //
   // Three distinct URLs are pinged:
-  //   1. https://api.hydradb.com/health   — cortex-application (covers 20 API components)
+  //   1. https://api.hydradb.com/health   — cortex-application (covers most API components)
   //   2. https://ingestion.usecortex.ai/health — cortex-ingestion (covers Ingestion group)
   //   3. https://app.hydradb.com           — Dashboard
   //
@@ -79,37 +81,19 @@ export function getHealthEndpoints(): HealthEndpoint[] {
   // the actual HTTP calls so each URL is only fetched once.
   const API_HEALTH = "https://api.hydradb.com/health";
   const INGESTION_HEALTH = "https://ingestion.usecortex.ai/health";
+  const DASHBOARD_URL = "https://app.hydradb.com";
 
-  return [
-    // Tenants (4) — cortex-application
-    { componentId: "create-tenant", name: "Create Tenant", url: API_HEALTH },
-    { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: API_HEALTH },
-    { componentId: "list-sub-tenant-ids", name: "List Sub-Tenant IDs", url: API_HEALTH },
-    { componentId: "delete-tenant", name: "Delete Tenant", url: API_HEALTH },
-    // Memories (3) — cortex-application
-    { componentId: "user-memory", name: "User Memory", url: API_HEALTH },
-    { componentId: "knowledge-base", name: "Knowledge Base", url: API_HEALTH },
-    { componentId: "shared-hive-memory", name: "Shared / Hive Memory", url: API_HEALTH },
-    // Recall (3) — cortex-application
-    { componentId: "full-recall", name: "Full Recall", url: API_HEALTH },
-    { componentId: "memory-recall", name: "Memory Recall", url: API_HEALTH },
-    { componentId: "lexical-recall", name: "Lexical Recall", url: API_HEALTH },
-    // Ingestion (1) — cortex-ingestion
-    { componentId: "verify-processing", name: "Verify Processing", url: INGESTION_HEALTH },
-    // Manage Memories (5) — cortex-application
-    { componentId: "list-data", name: "List", url: API_HEALTH },
-    { componentId: "fetch-content", name: "Fetch Content", url: API_HEALTH },
-    { componentId: "graph-relations", name: "Graph Relations", url: API_HEALTH },
-    { componentId: "delete-user-memory", name: "Delete User Memory", url: API_HEALTH },
-    { componentId: "delete-knowledge", name: "Delete Knowledge", url: API_HEALTH },
-    // Custom Embeddings (4) — cortex-application
-    { componentId: "add-embeddings", name: "Add Embeddings", url: API_HEALTH },
-    { componentId: "search-embeddings", name: "Search Embeddings", url: API_HEALTH },
-    { componentId: "filter-raw-embeddings", name: "Filter Raw Embeddings", url: API_HEALTH },
-    { componentId: "delete-embeddings", name: "Delete Embeddings", url: API_HEALTH },
-    // Dashboard (1) — app.hydradb.com
-    { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
-  ];
+  /** Maps component ID → health check URL. Components not listed default to API_HEALTH. */
+  const urlByComponentId: Record<string, string> = {
+    "verify-processing": INGESTION_HEALTH,
+    dashboard: DASHBOARD_URL,
+  };
+
+  return DEFAULT_COMPONENTS.map((c) => ({
+    componentId: c.id,
+    name: c.name,
+    url: urlByComponentId[c.id] ?? API_HEALTH,
+  }));
 }
 
 export function getTimeout(endpoint: HealthEndpoint): number {

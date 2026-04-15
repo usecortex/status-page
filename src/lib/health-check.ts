@@ -9,6 +9,10 @@ import {
   getTimeout,
 } from "./health-config";
 
+/** Unique key for deduplicating HTTP calls to the same method + URL. */
+const endpointKey = (ep: HealthEndpoint): string =>
+  `${ep.method ?? "GET"}|${ep.url}`;
+
 export interface HealthCheckResult {
   componentId: string;
   name: string;
@@ -89,7 +93,7 @@ export async function runHealthChecks(
   // Group endpoints by their effective request key (method + url).
   const urlMap = new Map<string, HealthEndpoint[]>();
   for (const ep of endpoints) {
-    const key = `${ep.method ?? "GET"}|${ep.url}`;
+    const key = endpointKey(ep);
     const group = urlMap.get(key);
     if (group) {
       group.push(ep);
@@ -105,13 +109,13 @@ export async function runHealthChecks(
   // Build a lookup from the unique results (index-aligned with uniqueEndpoints).
   const resultByKey = new Map<string, HealthCheckResult>();
   for (let i = 0; i < uniqueEndpoints.length; i++) {
-    const key = `${uniqueEndpoints[i].method ?? "GET"}|${uniqueEndpoints[i].url}`;
+    const key = endpointKey(uniqueEndpoints[i]);
     resultByKey.set(key, uniqueResults[i]);
   }
 
   // Fan out: produce one HealthCheckResult per original endpoint.
   return endpoints.map((ep) => {
-    const key = `${ep.method ?? "GET"}|${ep.url}`;
+    const key = endpointKey(ep);
     const shared = resultByKey.get(key)!;
     return {
       componentId: ep.componentId,

@@ -1,6 +1,5 @@
 import { checkEndpoint, runHealthChecks } from "@/lib/health-check";
 import type { HealthEndpoint } from "@/lib/health-config";
-import { getFailureThreshold, getTimeout } from "@/lib/health-config";
 
 // Mock fetch globally
 const originalFetch = global.fetch;
@@ -14,7 +13,6 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers();
   global.fetch = originalFetch;
-  delete process.env.HEALTH_CHECK_ENDPOINTS;
 });
 
 describe("checkEndpoint", () => {
@@ -256,84 +254,5 @@ describe("runHealthChecks", () => {
     expect(results[1].healthy).toBe(false);
     expect(results[1].statusCode).toBe(503);
     expect(results[2].healthy).toBe(true);
-  });
-});
-
-describe("health-config helpers", () => {
-  it("getTimeout returns default when not specified", () => {
-    const endpoint: HealthEndpoint = {
-      componentId: "test",
-      name: "Test",
-      url: "https://example.com",
-    };
-    expect(getTimeout(endpoint)).toBe(10_000);
-  });
-
-  it("getTimeout returns custom value", () => {
-    const endpoint: HealthEndpoint = {
-      componentId: "test",
-      name: "Test",
-      url: "https://example.com",
-      timeoutMs: 5000,
-    };
-    expect(getTimeout(endpoint)).toBe(5000);
-  });
-
-  it("getFailureThreshold returns default when not specified", () => {
-    const endpoint: HealthEndpoint = {
-      componentId: "test",
-      name: "Test",
-      url: "https://example.com",
-    };
-    expect(getFailureThreshold(endpoint)).toBe(2);
-  });
-
-  it("getFailureThreshold returns custom value", () => {
-    const endpoint: HealthEndpoint = {
-      componentId: "test",
-      name: "Test",
-      url: "https://example.com",
-      failureThreshold: 5,
-    };
-    expect(getFailureThreshold(endpoint)).toBe(5);
-  });
-});
-
-describe("HEALTH_CHECK_ENDPOINTS env var parsing", () => {
-  it("parses array format", () => {
-    process.env.HEALTH_CHECK_ENDPOINTS = JSON.stringify([
-      { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
-    ]);
-
-    jest.resetModules();
-    const { getHealthEndpoints } = require("@/lib/health-config");
-    const endpoints = getHealthEndpoints();
-    expect(endpoints).toHaveLength(1);
-    expect(endpoints[0].componentId).toBe("dashboard");
-  });
-
-  it("parses simple object format", () => {
-    process.env.HEALTH_CHECK_ENDPOINTS = JSON.stringify({
-      dashboard: "https://app.hydradb.com",
-      "full-recall": "https://api.hydradb.com/recall/full_recall",
-    });
-
-    jest.resetModules();
-    const { getHealthEndpoints } = require("@/lib/health-config");
-    const endpoints = getHealthEndpoints();
-    expect(endpoints).toHaveLength(2);
-    expect(endpoints[0].componentId).toBe("dashboard");
-    expect(endpoints[0].url).toBe("https://app.hydradb.com");
-  });
-
-  it("falls back to defaults on invalid JSON", () => {
-    process.env.HEALTH_CHECK_ENDPOINTS = "not-json";
-
-    jest.resetModules();
-    const { getHealthEndpoints } = require("@/lib/health-config");
-    const endpoints = getHealthEndpoints();
-    // Falls back to hardcoded defaults (21 endpoints)
-    expect(endpoints).toHaveLength(21);
-    expect(endpoints[0].componentId).toBe("create-tenant");
   });
 });

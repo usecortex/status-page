@@ -14,6 +14,7 @@ import {
 } from "@/lib/uptime";
 import { DEFAULT_COMPONENT_GROUPS, DEFAULT_COMPONENTS } from "@/lib/defaults";
 import type { StatusSnapshot } from "@/types/status";
+import type { DailyUptime, UptimeMetrics } from "@/types/status";
 
 export async function GET(request: Request): Promise<NextResponse> {
   try {
@@ -64,11 +65,11 @@ export async function GET(request: Request): Promise<NextResponse> {
             const widgetId = comp?.id ?? "";
             // Normalize: strip & / punctuation, collapse whitespace, then
             // try both space-separated and hyphenated forms
-            const normalized = normalizeName(comp?.name ?? "");
-            const hyphenated = normalized.replace(/\s+/g, "-");
+            const normalizedCompName = normalizeName(comp?.name ?? "");
+            const hyphenated = normalizedCompName.replace(/\s+/g, "-");
 
             const match =
-              internalLookup.get(normalized) ??
+              internalLookup.get(normalizedCompName) ??
               internalLookup.get(hyphenated) ??
               internalLookup.get(widgetId.toLowerCase());
 
@@ -113,7 +114,7 @@ export async function GET(request: Request): Promise<NextResponse> {
         // a previous snapshot by building a lookup from the existing data.
         const existingComponentMap = new Map<
           string,
-          { daily_history: any[]; uptime: any; status: string }
+          { daily_history: DailyUptime[]; uptime: UptimeMetrics; status: string }
         >();
         if (existing?.component_groups) {
           for (const group of existing.component_groups) {

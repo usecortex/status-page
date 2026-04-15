@@ -65,9 +65,7 @@ export const DEFAULT_COMPONENT_GROUPS: ComponentGroup[] = [
   {
     id: "ingestion",
     name: "Ingestion",
-    components: DEFAULT_COMPONENTS.filter((c) =>
-      ["verify-processing"].includes(c.id),
-    ),
+    components: DEFAULT_COMPONENTS.filter((c) => c.id === "verify-processing"),
   },
   {
     id: "manage-memories",

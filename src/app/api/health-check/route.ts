@@ -239,7 +239,7 @@ function buildIncidentSummary(
       ? `Affected components: ${affectedNames.join(", ")}. `
       : "";
 
-  if (result.statusCode) {
+  if (result.statusCode !== null) {
     const expected = endpoint.expectedStatus
       ? `expected ${endpoint.expectedStatus.join("/")}`
       : "expected 2xx";
