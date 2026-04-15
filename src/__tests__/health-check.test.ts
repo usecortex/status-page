@@ -1,4 +1,4 @@
-import { checkEndpoint, runHealthChecks } from "@/lib/health-check";
+import { checkEndpoint, runHealthChecks, fetchEndpoint } from "@/lib/health-check";
 import type { HealthEndpoint } from "@/lib/health-config";
 
 // Mock fetch globally
@@ -15,12 +15,19 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+/** Helper to create a mock Response with optional JSON body. */
+const mockResponse = (
+  status: number,
+  body?: Record<string, unknown>,
+) => ({
+  status,
+  ok: status >= 200 && status < 300,
+  json: body ? () => Promise.resolve(body) : () => Promise.reject(new Error("no body")),
+});
+
 describe("checkEndpoint", () => {
   it("returns healthy for 200 response", async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      status: 200,
-      ok: true,
-    });
+    global.fetch = jest.fn().mockResolvedValue(mockResponse(200));
 
     const endpoint: HealthEndpoint = {
       componentId: "dashboard",
@@ -173,7 +180,7 @@ describe("checkEndpoint", () => {
 
 describe("runHealthChecks", () => {
   it("runs all checks concurrently", async () => {
-    global.fetch = jest.fn().mockResolvedValue({ status: 200, ok: true });
+    global.fetch = jest.fn().mockResolvedValue(mockResponse(200));
 
     const endpoints: HealthEndpoint[] = [
       { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
@@ -189,7 +196,7 @@ describe("runHealthChecks", () => {
   });
 
   it("deduplicates HTTP calls for the same URL", async () => {
-    global.fetch = jest.fn().mockResolvedValue({ status: 200, ok: true });
+    global.fetch = jest.fn().mockResolvedValue(mockResponse(200));
 
     const endpoints: HealthEndpoint[] = [
       { componentId: "create-tenant", name: "Create Tenant", url: "https://api.hydradb.com/health" },
@@ -212,14 +219,15 @@ describe("runHealthChecks", () => {
     expect(results.every((r) => r.healthy)).toBe(true);
   });
 
-  it("propagates failure to all components sharing a URL", async () => {
+  it("propagates failure to all components sharing a URL (no requiredServices)", async () => {
     global.fetch = jest.fn().mockImplementation((url: string) => {
       if (url.includes("api.hydradb.com")) {
-        return Promise.resolve({ status: 503, ok: false });
+        return Promise.resolve(mockResponse(503));
       }
-      return Promise.resolve({ status: 200, ok: true });
+      return Promise.resolve(mockResponse(200));
     });
 
+    // No requiredServices — falls back to HTTP status code
     const endpoints: HealthEndpoint[] = [
       { componentId: "create-tenant", name: "Create Tenant", url: "https://api.hydradb.com/health" },
       { componentId: "user-memory", name: "User Memory", url: "https://api.hydradb.com/health" },
@@ -238,9 +246,9 @@ describe("runHealthChecks", () => {
   it("handles mixed healthy/unhealthy results across different URLs", async () => {
     global.fetch = jest.fn().mockImplementation((url: string) => {
       if (url.includes("ingestion")) {
-        return Promise.resolve({ status: 503, ok: false });
+        return Promise.resolve(mockResponse(503));
       }
-      return Promise.resolve({ status: 200, ok: true });
+      return Promise.resolve(mockResponse(200));
     });
 
     const endpoints: HealthEndpoint[] = [
@@ -254,5 +262,144 @@ describe("runHealthChecks", () => {
     expect(results[1].healthy).toBe(false);
     expect(results[1].statusCode).toBe(503);
     expect(results[2].healthy).toBe(true);
+  });
+});
+
+describe("per-service granularity", () => {
+  it("marks component healthy when all required services are up", async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      mockResponse(200, {
+        status: "ok",
+        checks: { milvus: true, falkordb: true, mongodb: true, dynamodb: true, s3: true },
+      }),
+    );
+
+    const endpoints: HealthEndpoint[] = [
+      {
+        componentId: "knowledge-base",
+        name: "Knowledge Base",
+        url: "https://api.hydradb.com/health",
+        requiredServices: ["mongodb", "dynamodb", "s3", "milvus", "falkordb"],
+      },
+    ];
+
+    const results = await runHealthChecks(endpoints);
+    expect(results[0].healthy).toBe(true);
+  });
+
+  it("marks component unhealthy when a required service is down", async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      mockResponse(503, {
+        status: "degraded",
+        checks: { milvus: true, falkordb: false, mongodb: true, dynamodb: true, s3: true },
+      }),
+    );
+
+    const endpoints: HealthEndpoint[] = [
+      {
+        componentId: "knowledge-base",
+        name: "Knowledge Base",
+        url: "https://api.hydradb.com/health",
+        requiredServices: ["mongodb", "dynamodb", "s3", "milvus", "falkordb"],
+      },
+    ];
+
+    const results = await runHealthChecks(endpoints);
+    expect(results[0].healthy).toBe(false);
+    expect(results[0].error).toContain("falkordb");
+  });
+
+  it("marks component healthy when only non-required services are down", async () => {
+    // FalkorDB is down, but create-tenant only needs mongodb, dynamodb, s3
+    global.fetch = jest.fn().mockResolvedValue(
+      mockResponse(503, {
+        status: "degraded",
+        checks: { milvus: true, falkordb: false, mongodb: true, dynamodb: true, s3: true },
+      }),
+    );
+
+    const endpoints: HealthEndpoint[] = [
+      {
+        componentId: "create-tenant",
+        name: "Create Tenant",
+        url: "https://api.hydradb.com/health",
+        requiredServices: ["mongodb", "dynamodb", "s3"],
+      },
+      {
+        componentId: "graph-relations",
+        name: "Graph Relations",
+        url: "https://api.hydradb.com/health",
+        requiredServices: ["mongodb", "dynamodb", "s3", "falkordb"],
+      },
+    ];
+
+    const results = await runHealthChecks(endpoints);
+    // create-tenant should be healthy — it doesn't need falkordb
+    expect(results[0].healthy).toBe(true);
+    // graph-relations should be unhealthy — it needs falkordb
+    expect(results[1].healthy).toBe(false);
+    expect(results[1].error).toContain("falkordb");
+  });
+
+  it("falls back to HTTP status when no service checks in response", async () => {
+    global.fetch = jest.fn().mockResolvedValue(mockResponse(503));
+
+    const endpoints: HealthEndpoint[] = [
+      {
+        componentId: "create-tenant",
+        name: "Create Tenant",
+        url: "https://api.hydradb.com/health",
+        requiredServices: ["mongodb", "dynamodb", "s3"],
+      },
+    ];
+
+    const results = await runHealthChecks(endpoints);
+    expect(results[0].healthy).toBe(false);
+    expect(results[0].error).toBe("HTTP 503");
+  });
+
+  it("falls back to HTTP status when no requiredServices configured", async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      mockResponse(503, {
+        status: "degraded",
+        checks: { falkordb: false, mongodb: true },
+      }),
+    );
+
+    const endpoints: HealthEndpoint[] = [
+      {
+        componentId: "dashboard",
+        name: "Dashboard",
+        url: "https://api.hydradb.com/health",
+        // no requiredServices
+      },
+    ];
+
+    const results = await runHealthChecks(endpoints);
+    expect(results[0].healthy).toBe(false);
+  });
+
+  it("lists all failed services in error message", async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      mockResponse(503, {
+        status: "down",
+        checks: { milvus: false, falkordb: false, mongodb: true, dynamodb: true, s3: false },
+      }),
+    );
+
+    const endpoints: HealthEndpoint[] = [
+      {
+        componentId: "knowledge-base",
+        name: "Knowledge Base",
+        url: "https://api.hydradb.com/health",
+        requiredServices: ["mongodb", "dynamodb", "s3", "milvus", "falkordb"],
+      },
+    ];
+
+    const results = await runHealthChecks(endpoints);
+    expect(results[0].healthy).toBe(false);
+    expect(results[0].error).toContain("milvus");
+    expect(results[0].error).toContain("falkordb");
+    expect(results[0].error).toContain("s3");
   });
 });
