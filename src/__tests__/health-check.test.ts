@@ -179,19 +179,67 @@ describe("runHealthChecks", () => {
 
     const endpoints: HealthEndpoint[] = [
       { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
-      { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: "https://api.hydradb.com/tenants/monitor" },
-      { componentId: "list-sub-tenant-ids", name: "List Sub-Tenant IDs", url: "https://api.hydradb.com/tenants/sub_tenant_ids" },
+      { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: "https://api.hydradb.com/health" },
+      { componentId: "list-sub-tenant-ids", name: "List Sub-Tenant IDs", url: "https://api.hydradb.com/health" },
     ];
 
     const results = await runHealthChecks(endpoints);
     expect(results).toHaveLength(3);
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    // Only 2 unique URLs: app.hydradb.com and api.hydradb.com/health
+    expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(results.every((r) => r.healthy)).toBe(true);
   });
 
-  it("handles mixed healthy/unhealthy results", async () => {
+  it("deduplicates HTTP calls for the same URL", async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 200, ok: true });
+
+    const endpoints: HealthEndpoint[] = [
+      { componentId: "create-tenant", name: "Create Tenant", url: "https://api.hydradb.com/health" },
+      { componentId: "user-memory", name: "User Memory", url: "https://api.hydradb.com/health" },
+      { componentId: "full-recall", name: "Full Recall", url: "https://api.hydradb.com/health" },
+      { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
+      { componentId: "verify-processing", name: "Verify Processing", url: "https://ingestion.usecortex.ai/health" },
+    ];
+
+    const results = await runHealthChecks(endpoints);
+    expect(results).toHaveLength(5);
+    // Only 3 unique URLs
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    // Each result has the correct componentId
+    expect(results[0].componentId).toBe("create-tenant");
+    expect(results[1].componentId).toBe("user-memory");
+    expect(results[2].componentId).toBe("full-recall");
+    expect(results[3].componentId).toBe("dashboard");
+    expect(results[4].componentId).toBe("verify-processing");
+    expect(results.every((r) => r.healthy)).toBe(true);
+  });
+
+  it("propagates failure to all components sharing a URL", async () => {
     global.fetch = jest.fn().mockImplementation((url: string) => {
-      if (url.includes("monitor")) {
+      if (url.includes("api.hydradb.com")) {
+        return Promise.resolve({ status: 503, ok: false });
+      }
+      return Promise.resolve({ status: 200, ok: true });
+    });
+
+    const endpoints: HealthEndpoint[] = [
+      { componentId: "create-tenant", name: "Create Tenant", url: "https://api.hydradb.com/health" },
+      { componentId: "user-memory", name: "User Memory", url: "https://api.hydradb.com/health" },
+      { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
+    ];
+
+    const results = await runHealthChecks(endpoints);
+    expect(results[0].healthy).toBe(false);
+    expect(results[0].statusCode).toBe(503);
+    expect(results[1].healthy).toBe(false);
+    expect(results[1].statusCode).toBe(503);
+    expect(results[2].healthy).toBe(true);
+    expect(results[2].statusCode).toBe(200);
+  });
+
+  it("handles mixed healthy/unhealthy results across different URLs", async () => {
+    global.fetch = jest.fn().mockImplementation((url: string) => {
+      if (url.includes("ingestion")) {
         return Promise.resolve({ status: 503, ok: false });
       }
       return Promise.resolve({ status: 200, ok: true });
@@ -199,13 +247,15 @@ describe("runHealthChecks", () => {
 
     const endpoints: HealthEndpoint[] = [
       { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
-      { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: "https://api.hydradb.com/tenants/monitor" },
+      { componentId: "verify-processing", name: "Verify Processing", url: "https://ingestion.usecortex.ai/health" },
+      { componentId: "create-tenant", name: "Create Tenant", url: "https://api.hydradb.com/health" },
     ];
 
     const results = await runHealthChecks(endpoints);
     expect(results[0].healthy).toBe(true);
     expect(results[1].healthy).toBe(false);
     expect(results[1].statusCode).toBe(503);
+    expect(results[2].healthy).toBe(true);
   });
 });
 
@@ -282,8 +332,8 @@ describe("HEALTH_CHECK_ENDPOINTS env var parsing", () => {
     jest.resetModules();
     const { getHealthEndpoints } = require("@/lib/health-config");
     const endpoints = getHealthEndpoints();
-    // Falls back to hardcoded defaults (3 endpoints)
-    expect(endpoints.length).toBeGreaterThan(0);
-    expect(endpoints[0].componentId).toBe("monitor-infra-status");
+    // Falls back to hardcoded defaults (21 endpoints)
+    expect(endpoints).toHaveLength(21);
+    expect(endpoints[0].componentId).toBe("create-tenant");
   });
 });

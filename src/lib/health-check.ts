@@ -78,9 +78,50 @@ export async function checkEndpoint(
 
 /**
  * Run health checks for all provided endpoints concurrently.
+ *
+ * When multiple endpoints share the same URL (and method), the HTTP request
+ * is made only once and the result is reused for every component that maps
+ * to that URL.  This avoids hammering the same service with duplicate pings.
  */
 export async function runHealthChecks(
   endpoints: HealthEndpoint[],
 ): Promise<HealthCheckResult[]> {
-  return Promise.all(endpoints.map(checkEndpoint));
+  // Group endpoints by their effective request key (method + url).
+  const urlMap = new Map<string, HealthEndpoint[]>();
+  for (const ep of endpoints) {
+    const key = `${ep.method ?? "GET"}|${ep.url}`;
+    const group = urlMap.get(key);
+    if (group) {
+      group.push(ep);
+    } else {
+      urlMap.set(key, [ep]);
+    }
+  }
+
+  // Fire one request per unique URL.
+  const uniqueEndpoints = [...urlMap.values()].map((group) => group[0]);
+  const uniqueResults = await Promise.all(uniqueEndpoints.map(checkEndpoint));
+
+  // Build a lookup from the unique results.
+  const resultByKey = new Map<string, HealthCheckResult>();
+  for (const r of uniqueResults) {
+    const ep = endpoints.find((e) => e.componentId === r.componentId)!;
+    const key = `${ep.method ?? "GET"}|${ep.url}`;
+    resultByKey.set(key, r);
+  }
+
+  // Fan out: produce one HealthCheckResult per original endpoint.
+  return endpoints.map((ep) => {
+    const key = `${ep.method ?? "GET"}|${ep.url}`;
+    const shared = resultByKey.get(key)!;
+    return {
+      componentId: ep.componentId,
+      name: ep.name,
+      url: ep.url,
+      healthy: shared.healthy,
+      statusCode: shared.statusCode,
+      latencyMs: shared.latencyMs,
+      error: shared.error,
+    };
+  });
 }

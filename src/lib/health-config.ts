@@ -68,12 +68,46 @@ export function getHealthEndpoints(): HealthEndpoint[] {
     }
   }
 
-  // Default health check endpoints
-  // The API base URL check covers all API components.
-  // GET endpoints can be pinged directly (they return 401/403 without auth, but prove the server is up).
+  // Default health check endpoints.
+  //
+  // Three distinct URLs are pinged:
+  //   1. https://api.hydradb.com/health   — cortex-application (covers 20 API components)
+  //   2. https://ingestion.usecortex.ai/health — cortex-ingestion (covers Ingestion group)
+  //   3. https://app.hydradb.com           — Dashboard
+  //
+  // Multiple components share the same URL. runHealthChecks() deduplicates
+  // the actual HTTP calls so each URL is only fetched once.
+  const API_HEALTH = "https://api.hydradb.com/health";
+  const INGESTION_HEALTH = "https://ingestion.usecortex.ai/health";
+
   return [
-    { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: "https://api.hydradb.com/tenants/monitor", expectedStatus: [200, 401, 403, 422] },
-    { componentId: "list-sub-tenant-ids", name: "List Sub-Tenant IDs", url: "https://api.hydradb.com/tenants/sub_tenant_ids", expectedStatus: [200, 401, 403, 422] },
+    // Tenants (4) — cortex-application
+    { componentId: "create-tenant", name: "Create Tenant", url: API_HEALTH },
+    { componentId: "monitor-infra-status", name: "Monitor & Infra Status", url: API_HEALTH },
+    { componentId: "list-sub-tenant-ids", name: "List Sub-Tenant IDs", url: API_HEALTH },
+    { componentId: "delete-tenant", name: "Delete Tenant", url: API_HEALTH },
+    // Memories (3) — cortex-application
+    { componentId: "user-memory", name: "User Memory", url: API_HEALTH },
+    { componentId: "knowledge-base", name: "Knowledge Base", url: API_HEALTH },
+    { componentId: "shared-hive-memory", name: "Shared / Hive Memory", url: API_HEALTH },
+    // Recall (3) — cortex-application
+    { componentId: "full-recall", name: "Full Recall", url: API_HEALTH },
+    { componentId: "memory-recall", name: "Memory Recall", url: API_HEALTH },
+    { componentId: "lexical-recall", name: "Lexical Recall", url: API_HEALTH },
+    // Ingestion (1) — cortex-ingestion
+    { componentId: "verify-processing", name: "Verify Processing", url: INGESTION_HEALTH },
+    // Manage Memories (5) — cortex-application
+    { componentId: "list-data", name: "List", url: API_HEALTH },
+    { componentId: "fetch-content", name: "Fetch Content", url: API_HEALTH },
+    { componentId: "graph-relations", name: "Graph Relations", url: API_HEALTH },
+    { componentId: "delete-user-memory", name: "Delete User Memory", url: API_HEALTH },
+    { componentId: "delete-knowledge", name: "Delete Knowledge", url: API_HEALTH },
+    // Custom Embeddings (4) — cortex-application
+    { componentId: "add-embeddings", name: "Add Embeddings", url: API_HEALTH },
+    { componentId: "search-embeddings", name: "Search Embeddings", url: API_HEALTH },
+    { componentId: "filter-raw-embeddings", name: "Filter Raw Embeddings", url: API_HEALTH },
+    { componentId: "delete-embeddings", name: "Delete Embeddings", url: API_HEALTH },
+    // Dashboard (1) — app.hydradb.com
     { componentId: "dashboard", name: "Dashboard", url: "https://app.hydradb.com" },
   ];
 }
