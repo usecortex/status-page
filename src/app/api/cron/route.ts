@@ -59,6 +59,12 @@ export async function GET(request: Request): Promise<NextResponse> {
             internalLookup.set(internalId.toLowerCase(), internalId);
             // Also index the space-separated form for normalizeName matching
             internalLookup.set(internalId.replace(/-/g, " ").toLowerCase(), internalId);
+            // Also index the display name for components where name != hyphen-to-space
+            // form of ID (e.g. "list-data" has display name "List")
+            const displayName = componentNameMap.get(internalId);
+            if (displayName) {
+              internalLookup.set(normalizeName(displayName), internalId);
+            }
           }
 
           for (const comp of raw.components) {
